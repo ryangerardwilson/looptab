@@ -1,0 +1,56 @@
+package runlog
+
+import (
+	"bytes"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ryangerardwilson/looptab/internal/paths"
+)
+
+func TestStorePrintSummary(t *testing.T) {
+	temp := t.TempDir()
+	p := paths.Paths{
+		StateDir:    temp,
+		LogDir:      filepath.Join(temp, "logs"),
+		HistoryFile: filepath.Join(temp, "runs.jsonl"),
+	}
+	store := NewStore(p)
+
+	record := Record{
+		RunID:          "run-1",
+		JobID:          "abcd1234",
+		Schedule:       "0 * * * *",
+		CWD:            temp,
+		Prompt:         "Do useful work.",
+		StartedAt:      time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC),
+		FinishedAt:     time.Date(2026, 6, 10, 10, 1, 0, 0, time.UTC),
+		DurationMillis: int64(time.Minute / time.Millisecond),
+		Status:         "ok",
+		ExitCode:       0,
+		Summary:        "Updated README and ran tests.",
+	}
+	if err := store.Save(record, "full output"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := store.PrintSummary(&out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"Looptab runs", "abcd1234", "Updated README and ran tests."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("summary missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestSummarizeUsesLastMeaningfulLine(t *testing.T) {
+	got := Summarize("starting\n\nChanged files and ran tests.\n", "")
+	if got != "Changed files and ran tests." {
+		t.Fatalf("unexpected summary: %q", got)
+	}
+}
