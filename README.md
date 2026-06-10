@@ -66,6 +66,9 @@ looptab check
 looptab run
   run the scheduler in the foreground
 
+looptab run now
+  run every now job once immediately
+
 looptab run job <id>
   run one parsed job immediately
 

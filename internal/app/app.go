@@ -32,7 +32,10 @@ func Run(args []string, version string) error {
 		if err := paths.EnsureConfigFile(p); err != nil {
 			return err
 		}
-		return editor.Open(p.ConfigFile)
+		if err := editor.Open(p.ConfigFile); err != nil {
+			return err
+		}
+		return printNowNotice(p, os.Stdout)
 	}
 
 	switch args[0] {
@@ -74,11 +77,15 @@ func runCommand(p paths.Paths, args []string) error {
 		return scheduler.New(p).Run(ctx)
 	}
 
+	if len(args) == 1 && args[0] == "now" {
+		return runNowJobs(p)
+	}
+
 	if len(args) == 2 && args[0] == "job" {
 		return runOneJob(p, args[1])
 	}
 
-	return errors.New("expected `looptab run` or `looptab run job <id>`")
+	return errors.New("expected `looptab run`, `looptab run now`, or `looptab run job <id>`")
 }
 
 func runOneJob(p paths.Paths, id string) error {
@@ -92,6 +99,34 @@ func runOneJob(p paths.Paths, id string) error {
 		return err
 	}
 
+	return runJobOnce(p, file, job)
+}
+
+func runNowJobs(p paths.Paths) error {
+	file, err := loadFile(p)
+	if err != nil {
+		return err
+	}
+
+	jobs := nowJobs(file)
+	if len(jobs) == 0 {
+		fmt.Fprintln(os.Stdout, "No now jobs are in the looptab file.")
+		return nil
+	}
+
+	var failures []string
+	for _, job := range jobs {
+		if err := runJobOnce(p, file, job); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", job.ID, err))
+		}
+	}
+	if len(failures) > 0 {
+		return errors.New(strings.Join(failures, "\n"))
+	}
+	return nil
+}
+
+func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
 	runner, err := codex.NewRunner()
 	if err != nil {
 		return err
@@ -219,6 +254,7 @@ func runCheck(p paths.Paths, w io.Writer) error {
 			fmt.Fprintf(w, "  %s  line %d  %s  %s  %q\n", job.ID, job.Line, job.Schedule, paths.DisplayPath(job.CWD), job.Prompt)
 		}
 	}
+	printNowNoticeForFile(p, file, w)
 	return nil
 }
 
@@ -228,6 +264,51 @@ func loadFile(p paths.Paths) (parser.File, error) {
 		return parser.File{}, err
 	}
 	return parser.Parse(string(content))
+}
+
+func printNowNotice(p paths.Paths, w io.Writer) error {
+	file, err := loadFile(p)
+	if err != nil {
+		return err
+	}
+	printNowNoticeForFile(p, file, w)
+	return nil
+}
+
+func printNowNoticeForFile(p paths.Paths, file parser.File, w io.Writer) {
+	jobs := nowJobs(file)
+	if len(jobs) == 0 {
+		return
+	}
+
+	if schedulerActive(p) {
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, "now jobs will run when the active scheduler reloads the file.")
+		return
+	}
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "now jobs are waiting, but no looptab scheduler is active.")
+	fmt.Fprintln(w, "run them once with:")
+	fmt.Fprintln(w, "  looptab run now")
+	fmt.Fprintln(w, "or keep looptab running with:")
+	fmt.Fprintln(w, "  looptab service install")
+	fmt.Fprintln(w, "  looptab service start")
+}
+
+func nowJobs(file parser.File) []parser.Job {
+	var jobs []parser.Job
+	for _, job := range file.Jobs {
+		if job.Once {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs
+}
+
+func schedulerActive(p paths.Paths) bool {
+	_, err := os.Stat(p.LockFile)
+	return err == nil
 }
 
 func printHelp(w io.Writer) {
@@ -261,8 +342,9 @@ features:
   looptab check
 
   run the scheduler in the foreground or run one job now
-  # run | run job <id>
+  # run | run now | run job <id>
   looptab run
+  looptab run now
   looptab run job a1b2c3d4
 
   inspect what ran, when it ran, and what Codex reported
