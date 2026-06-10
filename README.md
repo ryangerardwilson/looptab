@@ -79,10 +79,10 @@ looptab run job <id>
   run one parsed job immediately
 
 looptab logs
-  open the formatted run history log in your editor
+  open the detailed Markdown run report in your editor
 
 looptab logs print
-  print the formatted run history to stdout
+  print the compact run history table to stdout
 
 looptab logs job <id>
   show one job's run history and latest output tail
@@ -130,7 +130,9 @@ Looptab records every run in:
 ~/.local/state/looptab/active/
 ```
 
-`looptab logs` writes this summary to `~/.local/state/looptab/looptab.log` and opens it in your editor. `looptab logs print` prints the same table:
+`looptab logs` writes a detailed Markdown report to `~/.local/state/looptab/looptab.md` and opens it in your editor. The report includes an overview table plus one section per run with metadata, full prompt, untruncated report, error details, output log path, and captured Codex output.
+
+`looptab logs print` prints the compact table:
 
 ```text
 Looptab runs

@@ -241,7 +241,7 @@ func logsCommand(p paths.Paths, args []string) error {
 	}
 	store := runlog.NewStore(p).WithLocation(location)
 	if len(args) == 0 {
-		return openLogsSummary(p, store)
+		return openLogsReport(p, store)
 	}
 	if len(args) == 1 && args[0] == "print" {
 		return store.PrintSummary(os.Stdout)
@@ -252,9 +252,9 @@ func logsCommand(p paths.Paths, args []string) error {
 	return errors.New("expected `looptab logs`, `looptab logs print`, or `looptab logs job <id>`")
 }
 
-func openLogsSummary(p paths.Paths, store runlog.Store) error {
-	path := filepath.Join(p.StateDir, "looptab.log")
-	if err := store.WriteSummaryFile(path); err != nil {
+func openLogsReport(p paths.Paths, store runlog.Store) error {
+	path := filepath.Join(p.StateDir, "looptab.md")
+	if err := store.WriteMarkdownReportFile(path); err != nil {
 		return err
 	}
 	return editor.Open(path)
@@ -1039,8 +1039,8 @@ features:
 
   inspect what ran, when it ran, and what Codex reported
   # logs | logs print | logs job <id>
-  looptab logs
-  looptab logs print
+  looptab logs        open the detailed Markdown report
+  looptab logs print  print the compact table
   looptab logs job a1b2c3d4
 
   inspect live or completed Codex output

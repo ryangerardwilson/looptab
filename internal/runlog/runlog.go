@@ -220,6 +220,137 @@ func (s Store) WriteSummaryFile(path string) error {
 	return os.WriteFile(path, out.Bytes(), 0o600)
 }
 
+func (s Store) WriteMarkdownReportFile(path string) error {
+	if err := paths.EnsureState(s.paths); err != nil {
+		return err
+	}
+
+	var out bytes.Buffer
+	if err := s.WriteMarkdownReport(&out); err != nil {
+		return err
+	}
+	return os.WriteFile(path, out.Bytes(), 0o600)
+}
+
+func (s Store) WriteMarkdownReport(w io.Writer) error {
+	records, err := s.Records()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(w, "# Looptab Runs")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "- Generated: %s\n", formatWhen(time.Now(), s.location))
+	fmt.Fprintf(w, "- History: `%s`\n", s.paths.HistoryFile)
+	fmt.Fprintf(w, "- Output logs: `%s`\n", s.paths.LogDir)
+	fmt.Fprintf(w, "- Runs: %d\n", len(records))
+	fmt.Fprintln(w)
+
+	if len(records) == 0 {
+		fmt.Fprintln(w, "No looptab runs yet.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "History will appear after `looptab run` or `looptab run job <id>`.")
+		return nil
+	}
+
+	fmt.Fprintln(w, "## Overview")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| Started | Status | Duration | Job | CWD | Report |")
+	fmt.Fprintln(w, "| --- | --- | ---: | --- | --- | --- |")
+	for _, record := range records {
+		fmt.Fprintf(
+			w,
+			"| %s | %s | %s | `%s` | `%s` | %s |\n",
+			escapeMarkdownTable(formatWhen(record.StartedAt, recordLocation(record, s.location))),
+			escapeMarkdownTable(record.Status),
+			escapeMarkdownTable(formatDuration(record.DurationMillis)),
+			escapeMarkdownTable(record.JobID),
+			escapeMarkdownTable(paths.DisplayPath(record.CWD)),
+			escapeMarkdownTable(record.Summary),
+		)
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "## Run Details")
+	for index, record := range records {
+		if err := s.writeMarkdownRun(w, index+1, record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Store) writeMarkdownRun(w io.Writer, index int, record Record) error {
+	location := recordLocation(record, s.location)
+	fmt.Fprintln(w)
+	fmt.Fprintf(
+		w,
+		"### %d. %s - `%s` - %s\n",
+		index,
+		formatWhen(record.StartedAt, location),
+		record.JobID,
+		record.Status,
+	)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "- Run ID: `%s`\n", record.RunID)
+	fmt.Fprintf(w, "- Job ID: `%s`\n", record.JobID)
+	fmt.Fprintf(w, "- Line: %d\n", record.Line)
+	fmt.Fprintf(w, "- Schedule: `%s`\n", record.Schedule)
+	if record.Timezone != "" {
+		fmt.Fprintf(w, "- Timezone: `%s`\n", record.Timezone)
+	}
+	fmt.Fprintf(w, "- CWD: `%s`\n", paths.DisplayPath(record.CWD))
+	fmt.Fprintf(w, "- Started: %s\n", formatWhen(record.StartedAt, location))
+	if !record.FinishedAt.IsZero() {
+		fmt.Fprintf(w, "- Finished: %s\n", formatWhen(record.FinishedAt, location))
+	}
+	fmt.Fprintf(w, "- Duration: %s\n", formatDuration(record.DurationMillis))
+	fmt.Fprintf(w, "- Status: `%s`\n", record.Status)
+	fmt.Fprintf(w, "- Exit code: `%d`\n", record.ExitCode)
+	if record.OutputPath != "" {
+		fmt.Fprintf(w, "- Output log: `%s`\n", record.OutputPath)
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "#### Prompt")
+	fmt.Fprintln(w)
+	writeIndentedBlock(w, record.Prompt)
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "#### Report")
+	fmt.Fprintln(w)
+	if record.Summary != "" {
+		writeIndentedBlock(w, record.Summary)
+	} else {
+		fmt.Fprintln(w, "_No report was captured._")
+	}
+	fmt.Fprintln(w)
+
+	if record.Error != "" {
+		fmt.Fprintln(w, "#### Error")
+		fmt.Fprintln(w)
+		writeIndentedBlock(w, record.Error)
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintln(w, "#### Captured Output")
+	fmt.Fprintln(w)
+	output, err := readOutput(record.OutputPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || record.OutputPath == "" {
+			fmt.Fprintln(w, "_No captured output is available for this run._")
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(output) == "" {
+		fmt.Fprintln(w, "_Captured output was empty._")
+		return nil
+	}
+	writeIndentedBlock(w, output)
+	return nil
+}
+
 func (s Store) PrintJob(w io.Writer, id string) error {
 	records, err := s.Records()
 	if err != nil {
@@ -370,6 +501,37 @@ func recordLocation(record Record, fallback *time.Location) *time.Location {
 		return fallback
 	}
 	return time.UTC
+}
+
+func escapeMarkdownTable(input string) string {
+	input = strings.ReplaceAll(input, "\n", " ")
+	input = strings.ReplaceAll(input, "\r", " ")
+	input = strings.ReplaceAll(input, "|", `\|`)
+	input = strings.ReplaceAll(input, "`", "\\`")
+	return strings.TrimSpace(input)
+}
+
+func readOutput(path string) (string, error) {
+	if path == "" {
+		return "", os.ErrNotExist
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+func writeIndentedBlock(w io.Writer, text string) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if text == "" {
+		fmt.Fprintln(w, "    ")
+		return
+	}
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		fmt.Fprintf(w, "    %s\n", line)
+	}
 }
 
 func PrintTail(w io.Writer, path string, limit int) error {
