@@ -10,7 +10,7 @@ import (
 	"github.com/ryangerardwilson/looptab/internal/runlog"
 )
 
-func TestNowJobAlreadyAttemptedIgnoresSkippedRuns(t *testing.T) {
+func TestNowJobAlreadyAttemptedForLoad(t *testing.T) {
 	temp := t.TempDir()
 	p := paths.Paths{
 		StateDir:    temp,
@@ -25,11 +25,12 @@ func TestNowJobAlreadyAttemptedIgnoresSkippedRuns(t *testing.T) {
 		CWD:      temp,
 		Prompt:   "Run once.",
 	}
+	loadedAt := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
 
 	if err := store.Save(runlog.SkippedRecord(job, "previous run still active"), ""); err != nil {
 		t.Fatal(err)
 	}
-	attempted, err := nowJobAlreadyAttempted(store, job)
+	attempted, err := nowJobAlreadyAttemptedForLoad(store, job, loadedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +45,8 @@ func TestNowJobAlreadyAttemptedIgnoresSkippedRuns(t *testing.T) {
 		Schedule:       job.Schedule,
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
-		StartedAt:      time.Now(),
-		FinishedAt:     time.Now(),
+		StartedAt:      loadedAt.Add(-time.Minute),
+		FinishedAt:     loadedAt.Add(-time.Minute),
 		DurationMillis: 1,
 		Status:         "ok",
 		ExitCode:       0,
@@ -55,11 +56,26 @@ func TestNowJobAlreadyAttemptedIgnoresSkippedRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	attempted, err = nowJobAlreadyAttempted(store, job)
+	attempted, err = nowJobAlreadyAttemptedForLoad(store, job, loadedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempted {
+		t.Fatal("runs from a previous saved file should not claim this load")
+	}
+
+	record.RunID = "run-2"
+	record.StartedAt = loadedAt.Add(time.Second)
+	record.FinishedAt = loadedAt.Add(time.Second)
+	if err := store.Save(record, "done"); err != nil {
+		t.Fatal(err)
+	}
+
+	attempted, err = nowJobAlreadyAttemptedForLoad(store, job, loadedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !attempted {
-		t.Fatal("completed runs should claim now jobs")
+		t.Fatal("runs from the same saved file should claim now jobs")
 	}
 }

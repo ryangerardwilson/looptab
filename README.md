@@ -52,8 +52,8 @@ saturday|saturdays <time[,time...]>
 sunday|sundays <time[,time...]>
 ```
 
-`now` runs once when the background scheduler first sees that exact job. If you edit and save the file while the scheduler is running, changed `now` jobs run once after that reload.
-The background scheduler records claimed `now` job IDs in `~/.local/state/looptab/now-runs.json`, so restarting the service does not rerun unchanged `now` jobs. Use `looptab run now` to force a manual run.
+`now` runs once per saved looptab file load. If you edit and save the file while the scheduler is running, `now` jobs in that saved file run once after reload.
+The background scheduler records claimed `now` jobs by job ID and file modification time in `~/.local/state/looptab/now-runs.json`, so restarting the service does not rerun the same saved file. Use `looptab run now` to force a manual run.
 
 Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
 `hourly` runs at minute `0` each hour. Use `hourly at 15` to run at minute `15` each hour.

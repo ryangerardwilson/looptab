@@ -47,7 +47,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		return err
 	}
 
-	active, err := s.startCron(ctx, file, runner, store)
+	active, err := s.startCron(ctx, file, mtime, runner, store)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			}
 
 			active.Stop()
-			active, err = s.startCron(ctx, nextFile, runner, store)
+			active, err = s.startCron(ctx, nextFile, nextMTime, runner, store)
 			if err != nil {
 				if !nextMTime.Equal(lastReloadErrorMTime) {
 					fmt.Fprintf(os.Stderr, "looptab reload failed: %v\n", err)
@@ -115,7 +115,7 @@ func (s *Scheduler) loadFile() (parser.File, time.Time, error) {
 	return file, stat.ModTime(), err
 }
 
-func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner codex.Runner, store runlog.Store) (*cron.Cron, error) {
+func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt time.Time, runner codex.Runner, store runlog.Store) (*cron.Cron, error) {
 	parserSpec := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(
 		cron.WithParser(parserSpec),
@@ -126,15 +126,18 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner code
 	for _, job := range file.Jobs {
 		localJob := job
 		if localJob.Once {
-			alreadyAttempted, err := nowJobAlreadyAttempted(store, localJob)
+			claimed, err := oncejob.NewStore(s.paths).Claim(localJob, loadedAt)
 			if err != nil {
 				return nil, err
 			}
-			claimed, err := oncejob.NewStore(s.paths).Claim(localJob)
+			if !claimed {
+				continue
+			}
+			alreadyAttempted, err := nowJobAlreadyAttemptedForLoad(store, localJob, loadedAt)
 			if err != nil {
 				return nil, err
 			}
-			if alreadyAttempted || !claimed {
+			if alreadyAttempted {
 				continue
 			}
 			go s.runJob(ctx, localJob, runner, store)
@@ -153,13 +156,13 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner code
 	return c, nil
 }
 
-func nowJobAlreadyAttempted(store runlog.Store, job parser.Job) (bool, error) {
+func nowJobAlreadyAttemptedForLoad(store runlog.Store, job parser.Job, loadedAt time.Time) (bool, error) {
 	records, err := store.Records()
 	if err != nil {
 		return false, err
 	}
 	for _, record := range records {
-		if record.JobID == job.ID && record.Status != "skipped" {
+		if record.JobID == job.ID && record.Status != "skipped" && !record.StartedAt.Before(loadedAt) {
 			return true, nil
 		}
 	}
