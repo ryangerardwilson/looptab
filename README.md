@@ -92,6 +92,9 @@ looptab inspect
 looptab inspect <job-or-run-id>
   follow active output or show the latest completed output for a job or run
 
+looptab stream
+  stream live Codex output across all active loops
+
 looptab status
   show currently running Codex loops
 
@@ -138,6 +141,14 @@ looptab inspect a1b2c3d4
 ```
 
 If exactly one job is active, `looptab inspect` follows that run's live output until it finishes or you press `Ctrl-C`. With an ID, Looptab first looks for an active job or run, then falls back to the latest completed run with that job ID.
+
+To watch all active jobs at once:
+
+```sh
+looptab stream
+```
+
+`looptab stream` waits when no loops are active. When a loop starts, it prints the latest live output for that run, prefixes streamed lines with the job ID, and keeps following all active loops until you press `Ctrl-C`.
 
 `looptab status json` prints live active-run state for desktop bars and scripts.
 `looptab status watch` streams the same shape as compact JSON lines:

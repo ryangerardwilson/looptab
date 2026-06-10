@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,6 +56,8 @@ func Run(args []string, version string) error {
 		return logsCommand(p, args[1:])
 	case "inspect":
 		return inspectCommand(p, args[1:])
+	case "stream":
+		return streamCommand(p, args[1:])
 	case "status":
 		return statusCommand(p, args[1:])
 	case "service":
@@ -291,6 +294,17 @@ func inspectCommand(p paths.Paths, args []string) error {
 	return inspectCompletedRun(p, id, os.Stdout)
 }
 
+func streamCommand(p paths.Paths, args []string) error {
+	if len(args) != 0 {
+		return errors.New("expected `looptab stream`")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return streamActiveRuns(ctx, active.NewStore(p), os.Stdout, 250*time.Millisecond)
+}
+
 func selectActiveJob(jobs []active.Job, id string) (active.Job, bool, error) {
 	if id == "" {
 		if len(jobs) == 1 {
@@ -367,6 +381,222 @@ func inspectCompletedRun(p paths.Paths, id string, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "output: %s\n\n", latest.OutputPath)
 	return runlog.PrintTail(w, latest.OutputPath, 80)
+}
+
+type runStream struct {
+	job            active.Job
+	file           *os.File
+	offset         int64
+	atLineStart    bool
+	waitingForFile bool
+}
+
+func streamActiveRuns(ctx context.Context, store active.Store, w io.Writer, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	streams := make(map[string]*runStream)
+	waitingPrinted := false
+
+	for {
+		summary, err := store.Summary()
+		if err != nil {
+			closeRunStreams(streams)
+			return err
+		}
+
+		activeRuns := make(map[string]bool)
+		if summary.Count == 0 && len(streams) == 0 && !waitingPrinted {
+			fmt.Fprintln(w, "No looptab Codex runs are active; waiting for live output. Press Ctrl-C to stop.")
+			waitingPrinted = true
+		}
+
+		for _, job := range summary.Jobs {
+			activeRuns[job.RunID] = true
+			if _, ok := streams[job.RunID]; ok {
+				continue
+			}
+
+			stream, err := openRunStream(job, w)
+			if err != nil {
+				closeRunStreams(streams)
+				return err
+			}
+			streams[job.RunID] = stream
+			waitingPrinted = false
+		}
+
+		for runID, stream := range streams {
+			if err := stream.copyNew(w); err != nil {
+				closeRunStreams(streams)
+				return err
+			}
+			if activeRuns[runID] {
+				continue
+			}
+
+			if err := stream.copyNew(w); err != nil {
+				closeRunStreams(streams)
+				return err
+			}
+			stream.close()
+			fmt.Fprintf(w, "\n[%s] finished\n", stream.job.JobID)
+			delete(streams, runID)
+		}
+
+		select {
+		case <-ctx.Done():
+			closeRunStreams(streams)
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func openRunStream(job active.Job, w io.Writer) (*runStream, error) {
+	fmt.Fprintf(w, "\n[%s] started from %s: %s\n", job.JobID, job.CWDDisplay, job.Prompt)
+	if job.OutputPath == "" {
+		fmt.Fprintf(w, "[%s] live output is not available for this run\n", job.JobID)
+		return &runStream{job: job, atLineStart: true}, nil
+	}
+
+	stream := &runStream{job: job, atLineStart: true}
+	if err := stream.openOutput(w); err != nil {
+		return nil, err
+	}
+	return stream, nil
+}
+
+func (s *runStream) openOutput(w io.Writer) error {
+	if s.file != nil || s.job.OutputPath == "" {
+		return nil
+	}
+
+	file, err := os.Open(s.job.OutputPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if !s.waitingForFile {
+				fmt.Fprintf(w, "[%s] waiting for live output file: %s\n", s.job.JobID, s.job.OutputPath)
+				s.waitingForFile = true
+			}
+			return nil
+		}
+		return err
+	}
+
+	s.file = file
+	s.waitingForFile = false
+	offset, err := s.printInitialTail(w, 30)
+	if err != nil {
+		s.close()
+		return err
+	}
+	s.offset = offset
+	return nil
+}
+
+func (s *runStream) printInitialTail(w io.Writer, limit int) (int64, error) {
+	if s.file == nil {
+		return 0, nil
+	}
+	content, err := io.ReadAll(s.file)
+	if err != nil {
+		return 0, err
+	}
+	if len(content) == 0 {
+		return 0, nil
+	}
+
+	tail := lastOutputLines(content, limit)
+	if len(tail) != len(content) {
+		fmt.Fprintf(w, "[%s] ... showing latest %d lines\n", s.job.JobID, limit)
+	}
+	atLineStart, err := writeLabeledOutput(w, s.job.JobID, tail, true)
+	if err != nil {
+		return 0, err
+	}
+	s.atLineStart = atLineStart
+	return int64(len(content)), nil
+}
+
+func (s *runStream) copyNew(w io.Writer) error {
+	if s.file == nil {
+		return s.openOutput(w)
+	}
+
+	stat, err := s.file.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() < s.offset {
+		s.offset = 0
+	}
+	if stat.Size() == s.offset {
+		return nil
+	}
+	if _, err := s.file.Seek(s.offset, io.SeekStart); err != nil {
+		return err
+	}
+
+	reader := io.LimitReader(s.file, stat.Size()-s.offset)
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return err
+	}
+	atLineStart, err := writeLabeledOutput(w, s.job.JobID, content, s.atLineStart)
+	if err != nil {
+		return err
+	}
+	s.atLineStart = atLineStart
+	s.offset = stat.Size()
+	return nil
+}
+
+func (s *runStream) close() {
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file = nil
+	}
+}
+
+func closeRunStreams(streams map[string]*runStream) {
+	for _, stream := range streams {
+		stream.close()
+	}
+}
+
+func lastOutputLines(content []byte, limit int) []byte {
+	if limit <= 0 || len(content) == 0 {
+		return nil
+	}
+
+	lines := bytes.SplitAfter(content, []byte("\n"))
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) <= limit {
+		return content
+	}
+	return bytes.Join(lines[len(lines)-limit:], nil)
+}
+
+func writeLabeledOutput(w io.Writer, label string, content []byte, atLineStart bool) (bool, error) {
+	parts := bytes.SplitAfter(content, []byte("\n"))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		if atLineStart {
+			if _, err := fmt.Fprintf(w, "[%s] ", label); err != nil {
+				return atLineStart, err
+			}
+		}
+		if _, err := w.Write(part); err != nil {
+			return atLineStart, err
+		}
+		atLineStart = bytes.HasSuffix(part, []byte("\n"))
+	}
+	return atLineStart, nil
 }
 
 func followActiveOutput(p paths.Paths, job active.Job, w io.Writer) error {
@@ -649,6 +879,10 @@ features:
   # inspect | inspect <job-or-run-id>
   looptab inspect
   looptab inspect a1b2c3d4
+
+  stream live Codex output across all active loops
+  # stream
+  looptab stream
 
   inspect active Codex loops
   # status | status json | status watch
