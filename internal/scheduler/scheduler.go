@@ -15,6 +15,11 @@ import (
 	"github.com/ryangerardwilson/looptab/internal/runlog"
 )
 
+const (
+	reloadPollInterval   = 250 * time.Millisecond
+	reloadSettleInterval = 100 * time.Millisecond
+)
+
 type Scheduler struct {
 	paths   paths.Paths
 	running map[string]bool
@@ -46,9 +51,10 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 	fmt.Fprintf(os.Stdout, "looptab running: %d jobs from %s in %s\n", len(file.Jobs), s.paths.ConfigFile, file.Timezone)
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(reloadPollInterval)
 	defer ticker.Stop()
 	defer active.Stop()
+	var lastReloadErrorMTime time.Time
 
 	for {
 		select {
@@ -64,21 +70,31 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			if !stat.ModTime().After(mtime) {
 				continue
 			}
+			if time.Since(stat.ModTime()) < reloadSettleInterval {
+				continue
+			}
 
 			nextFile, nextMTime, err := s.loadFile()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "looptab reload failed:\n%v\n", err)
+				if !nextMTime.Equal(lastReloadErrorMTime) {
+					fmt.Fprintf(os.Stderr, "looptab reload failed:\n%v\n", err)
+					lastReloadErrorMTime = nextMTime
+				}
 				continue
 			}
 
 			active.Stop()
 			active, err = s.startCron(ctx, nextFile, runner, store)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "looptab reload failed: %v\n", err)
+				if !nextMTime.Equal(lastReloadErrorMTime) {
+					fmt.Fprintf(os.Stderr, "looptab reload failed: %v\n", err)
+					lastReloadErrorMTime = nextMTime
+				}
 				continue
 			}
 			file = nextFile
 			mtime = nextMTime
+			lastReloadErrorMTime = time.Time{}
 			fmt.Fprintf(os.Stdout, "looptab reloaded: %d jobs in %s\n", len(file.Jobs), file.Timezone)
 		}
 	}

@@ -84,6 +84,9 @@ looptab status
 looptab status json
   print active loop state for bars and scripts
 
+looptab status watch
+  stream active loop state as JSON lines for desktop bars and scripts
+
 looptab service install
 looptab service start
 looptab service stop
@@ -113,7 +116,8 @@ when                     status  duration  job       cwd                 report
 
 The JSONL history is the audit trail. The per-run `.log` files contain full Codex output.
 
-`looptab status json` prints live active-run state for desktop bars and scripts:
+`looptab status json` prints live active-run state for desktop bars and scripts.
+`looptab status watch` streams the same shape as compact JSON lines:
 
 ```json
 {

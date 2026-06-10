@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -164,7 +165,42 @@ func statusCommand(p paths.Paths, args []string) error {
 	if len(args) == 1 && args[0] == "json" {
 		return store.PrintJSON(os.Stdout)
 	}
-	return errors.New("expected `looptab status` or `looptab status json`")
+	if len(args) == 1 && args[0] == "watch" {
+		return watchStatus(store, os.Stdout, 200*time.Millisecond)
+	}
+	return errors.New("expected `looptab status`, `looptab status json`, or `looptab status watch`")
+}
+
+func watchStatus(store active.Store, w io.Writer, interval time.Duration) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		if err := printStatusJSONLine(store, w); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func printStatusJSONLine(store active.Store, w io.Writer) error {
+	summary, err := store.Summary()
+	if err != nil {
+		return err
+	}
+	content, err := json.Marshal(summary)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(content))
+	return err
 }
 
 func logsCommand(p paths.Paths, args []string) error {
@@ -386,9 +422,10 @@ features:
   looptab logs job a1b2c3d4
 
   inspect active Codex loops
-  # status | status json
+  # status | status json | status watch
   looptab status
   looptab status json
+  looptab status watch
 
   install and manage the background scheduler
   # service install|start|stop|status|remove
