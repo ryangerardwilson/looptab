@@ -97,6 +97,39 @@ func TestParseFileUsesHomeWhenCWDIsOmitted(t *testing.T) {
 	}
 }
 
+func TestParseFileSupportsHourlySchedules(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := Parse(`
+hourly "Run from home."
+hourly at 15 ~/Work/example "Run from repo."
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(file.Jobs))
+	}
+	if file.Jobs[0].Schedule != "hourly" {
+		t.Fatalf("unexpected schedule: %s", file.Jobs[0].Schedule)
+	}
+	if file.Jobs[0].CronSpecs[0] != "0 * * * *" {
+		t.Fatalf("unexpected hourly spec: %s", file.Jobs[0].CronSpecs[0])
+	}
+	if file.Jobs[0].CWD != home {
+		t.Fatalf("expected cwd %s, got %s", home, file.Jobs[0].CWD)
+	}
+	if file.Jobs[1].Schedule != "hourly at 15" {
+		t.Fatalf("unexpected schedule: %s", file.Jobs[1].Schedule)
+	}
+	if file.Jobs[1].CronSpecs[0] != "15 * * * *" {
+		t.Fatalf("unexpected hourly at spec: %s", file.Jobs[1].CronSpecs[0])
+	}
+}
+
 func TestParseFileRejectsOldCronSyntax(t *testing.T) {
 	_, err := Parse(`0 * * * * ~/Work/example "Review the repo."`)
 	if err == nil {
@@ -133,6 +166,16 @@ func TestParseFileRejectsNowWithTime(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 	if !strings.Contains(err.Error(), "now does not accept a time") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseFileRejectsBadHourlyMinute(t *testing.T) {
+	_, err := Parse(`hourly at 60 "Run tests."`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "invalid hourly minute") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

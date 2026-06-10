@@ -345,7 +345,7 @@ func looksLikePath(value string) bool {
 func compileSchedule(input string) ([]string, bool, error) {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
-		return nil, false, errors.New("expected schedule like `daily 11am` or `now`")
+		return nil, false, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
 	}
 
 	frequency := strings.ToLower(parts[0])
@@ -355,9 +355,16 @@ func compileSchedule(input string) ([]string, bool, error) {
 		}
 		return nil, true, nil
 	}
+	if frequency == "hourly" || frequency == "hour" || frequency == "hours" {
+		spec, err := compileHourlySpec(parts)
+		if err != nil {
+			return nil, false, err
+		}
+		return []string{spec}, false, nil
+	}
 
 	if len(parts) < 2 {
-		return nil, false, errors.New("expected schedule like `daily 11am` or `now`")
+		return nil, false, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
 	}
 
 	daySpec, err := compileDaySpec(frequency)
@@ -389,6 +396,21 @@ func compileSchedule(input string) ([]string, bool, error) {
 	return specs, false, nil
 }
 
+func compileHourlySpec(parts []string) (string, error) {
+	if len(parts) == 1 {
+		return "0 * * * *", nil
+	}
+	if len(parts) != 3 || strings.ToLower(parts[1]) != "at" {
+		return "", errors.New("hourly accepts no time or `at <minute>`")
+	}
+
+	minute, err := strconv.Atoi(parts[2])
+	if err != nil || minute < 0 || minute > 59 {
+		return "", fmt.Errorf("invalid hourly minute %q; use 0-59", parts[2])
+	}
+	return fmt.Sprintf("%d * * * *", minute), nil
+}
+
 func compileDaySpec(frequency string) (string, error) {
 	switch frequency {
 	case "daily", "day", "days":
@@ -412,7 +434,7 @@ func compileDaySpec(frequency string) (string, error) {
 	case "saturday", "saturdays":
 		return "6", nil
 	default:
-		return "", fmt.Errorf("unknown schedule %q; use daily, weekdays, weekends, or a weekday name", frequency)
+		return "", fmt.Errorf("unknown schedule %q; use hourly, daily, weekdays, weekends, or a weekday name", frequency)
 	}
 }
 

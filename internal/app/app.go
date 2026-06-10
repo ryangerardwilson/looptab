@@ -400,6 +400,8 @@ features:
 
   # <when> [cwd] "<prompt>"
   now "Run once from home when looptab loads."
+  hourly "Review from home once per hour."
+  hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
   daily 11am "Review from home and fix one small obvious issue."
   daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
   daily 11am,12pm,1pm ~/Work/example "Run a quick maintenance pass."

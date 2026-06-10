@@ -24,6 +24,8 @@ timezone UTC
 
 now "Run once from home when looptab loads."
 now ~/Work/example "Run once from this repo when looptab loads."
+hourly "Review from home once per hour."
+hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
 daily 11am "Review from home and fix one small obvious issue."
 daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
 daily 11am,12pm,1pm /home/ryan/Apps/example "Run a quick maintenance pass."
@@ -36,6 +38,8 @@ Supported schedules:
 
 ```text
 now
+hourly
+hourly at <minute>
 daily <time[,time...]>
 weekdays <time[,time...]>
 weekends <time[,time...]>
@@ -51,6 +55,7 @@ sunday|sundays <time[,time...]>
 `now` runs once each time `looptab run` loads the file. If you edit and save the file while the scheduler is running, `now` jobs in the new file run once after that reload.
 
 Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
+`hourly` runs at minute `0` each hour. Use `hourly at 15` to run at minute `15` each hour.
 
 When present, the working directory must be absolute or start with `~`. The prompt must be quoted.
 
