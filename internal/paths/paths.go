@@ -11,6 +11,7 @@ type Paths struct {
 	ConfigDir   string
 	ConfigFile  string
 	StateDir    string
+	ActiveDir   string
 	LogDir      string
 	HistoryFile string
 	LockFile    string
@@ -29,12 +30,14 @@ func Default() (Paths, error) {
 	}
 
 	stateDir := filepath.Join(stateRoot, "looptab")
+	activeDir := filepath.Join(stateDir, "active")
 	logDir := filepath.Join(stateDir, "logs")
 
 	return Paths{
 		ConfigDir:   configDir,
 		ConfigFile:  filepath.Join(configDir, "looptab"),
 		StateDir:    stateDir,
+		ActiveDir:   activeDir,
 		LogDir:      logDir,
 		HistoryFile: filepath.Join(stateDir, "runs.jsonl"),
 		LockFile:    filepath.Join(stateDir, "looptab.lock"),
@@ -55,10 +58,20 @@ func EnsureConfigFile(p Paths) error {
 }
 
 func EnsureState(p Paths) error {
-	if err := os.MkdirAll(p.LogDir, 0o700); err != nil {
-		return err
+	if p.LogDir != "" {
+		if err := os.MkdirAll(p.LogDir, 0o700); err != nil {
+			return err
+		}
 	}
-	return os.MkdirAll(p.StateDir, 0o700)
+	if p.ActiveDir != "" {
+		if err := os.MkdirAll(p.ActiveDir, 0o700); err != nil {
+			return err
+		}
+	}
+	if p.StateDir != "" {
+		return os.MkdirAll(p.StateDir, 0o700)
+	}
+	return nil
 }
 
 func DisplayPath(path string) string {

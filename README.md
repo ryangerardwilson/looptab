@@ -75,6 +75,12 @@ looptab logs
 looptab logs job <id>
   show one job's run history and latest output tail
 
+looptab status
+  show currently running Codex loops
+
+looptab status json
+  print active loop state for bars and scripts
+
 looptab service install
 looptab service start
 looptab service stop
@@ -90,6 +96,7 @@ Looptab records every run in:
 ```text
 ~/.local/state/looptab/runs.jsonl
 ~/.local/state/looptab/logs/
+~/.local/state/looptab/active/
 ```
 
 `looptab logs` prints a summary table:
@@ -102,6 +109,24 @@ when                     status  duration  job       cwd                 report
 ```
 
 The JSONL history is the audit trail. The per-run `.log` files contain full Codex output.
+
+`looptab status json` prints live active-run state for desktop bars and scripts:
+
+```json
+{
+  "running": true,
+  "count": 1,
+  "jobs": [
+    {
+      "job_id": "a1b2c3d4",
+      "schedule": "daily 11am",
+      "cwd_display": "~/Work/example",
+      "prompt": "Review the repo.",
+      "duration_millis": 42000
+    }
+  ]
+}
+```
 
 ## Background Service
 

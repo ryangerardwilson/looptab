@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ryangerardwilson/looptab/internal/active"
 	"github.com/ryangerardwilson/looptab/internal/codex"
 	"github.com/ryangerardwilson/looptab/internal/editor"
 	"github.com/ryangerardwilson/looptab/internal/lock"
@@ -47,6 +48,8 @@ func Run(args []string, version string) error {
 		return runCommand(p, args[1:])
 	case "logs":
 		return logsCommand(p, args[1:])
+	case "status":
+		return statusCommand(p, args[1:])
 	case "service":
 		return serviceCommand(args[1:])
 	default:
@@ -95,7 +98,14 @@ func runOneJob(p paths.Paths, id string) error {
 	}
 
 	store := runlog.NewStore(p).WithLocation(file.Location)
+	activeStore := active.NewStore(p)
 	fmt.Fprintf(os.Stdout, "running job %s from %s\n", job.ID, paths.DisplayPath(job.CWD))
+	handle, err := activeStore.Begin(job)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "looptab active status failed: %v\n", err)
+	} else {
+		defer handle.End()
+	}
 	result := runner.Run(context.Background(), job)
 	record, outputErr := runlog.RecordFromResult(job, result)
 	if outputErr != nil {
@@ -109,6 +119,17 @@ func runOneJob(p paths.Paths, id string) error {
 		return result.Err
 	}
 	return nil
+}
+
+func statusCommand(p paths.Paths, args []string) error {
+	store := active.NewStore(p)
+	if len(args) == 0 {
+		return store.Print(os.Stdout)
+	}
+	if len(args) == 1 && args[0] == "json" {
+		return store.PrintJSON(os.Stdout)
+	}
+	return errors.New("expected `looptab status` or `looptab status json`")
 }
 
 func logsCommand(p paths.Paths, args []string) error {
@@ -248,6 +269,11 @@ features:
   # logs | logs job <id>
   looptab logs
   looptab logs job a1b2c3d4
+
+  inspect active Codex loops
+  # status | status json
+  looptab status
+  looptab status json
 
   install and manage the background scheduler
   # service install|start|stop|status|remove

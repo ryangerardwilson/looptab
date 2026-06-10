@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/ryangerardwilson/looptab/internal/active"
 	"github.com/ryangerardwilson/looptab/internal/codex"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
@@ -132,6 +133,13 @@ func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Run
 		return
 	}
 	defer s.finish(job.ID)
+
+	handle, err := active.NewStore(s.paths).Begin(job)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "looptab active status failed: %v\n", err)
+	} else {
+		defer handle.End()
+	}
 
 	info, err := os.Stat(job.CWD)
 	if err != nil {
