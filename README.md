@@ -83,6 +83,12 @@ looptab logs
 looptab logs job <id>
   show one job's run history and latest output tail
 
+looptab inspect
+  follow the only active Codex run's live output
+
+looptab inspect <job-or-run-id>
+  follow active output or show the latest completed output for a job or run
+
 looptab status
   show currently running Codex loops
 
@@ -119,7 +125,16 @@ when                     status  duration  job       cwd                 report
 2026-06-10 11:00:00 IST  failed  8s        a1b2c3d4  ~/Work/example      codex exited with status 1
 ```
 
-The JSONL history is the audit trail. The per-run `.log` files contain full Codex output.
+The JSONL history is the audit trail. The per-run `.log` files contain full Codex output. While a run is active, Codex output is written to that run's log file as it arrives.
+
+To inspect a running job:
+
+```sh
+looptab inspect
+looptab inspect a1b2c3d4
+```
+
+If exactly one job is active, `looptab inspect` follows that run's live output until it finishes or you press `Ctrl-C`. With an ID, Looptab first looks for an active job or run, then falls back to the latest completed run with that job ID.
 
 `looptab status json` prints live active-run state for desktop bars and scripts.
 `looptab status watch` streams the same shape as compact JSON lines:
@@ -134,7 +149,8 @@ The JSONL history is the audit trail. The per-run `.log` files contain full Code
       "schedule": "daily 11am",
       "cwd_display": "~/Work/example",
       "prompt": "Review the repo.",
-      "duration_millis": 42000
+      "duration_millis": 42000,
+      "output_path": "/home/user/.local/state/looptab/logs/20260610T043000.000000000Z-a1b2c3d4.log"
     }
   ]
 }

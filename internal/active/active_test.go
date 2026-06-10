@@ -2,6 +2,7 @@ package active
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ func TestStoreTracksActiveJob(t *testing.T) {
 	store := NewStore(paths.Paths{
 		StateDir:  temp,
 		ActiveDir: filepath.Join(temp, "active"),
+		LogDir:    filepath.Join(temp, "logs"),
 	})
 
 	job := parser.Job{
@@ -40,6 +42,12 @@ func TestStoreTracksActiveJob(t *testing.T) {
 	}
 	if summary.Jobs[0].JobID != "abcd1234" {
 		t.Fatalf("unexpected job id: %s", summary.Jobs[0].JobID)
+	}
+	if summary.Jobs[0].OutputPath == "" {
+		t.Fatal("expected output path")
+	}
+	if _, err := os.Stat(summary.Jobs[0].OutputPath); err != nil {
+		t.Fatalf("expected live output file: %v", err)
 	}
 
 	var jsonOut bytes.Buffer

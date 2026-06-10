@@ -21,19 +21,21 @@ type Store struct {
 }
 
 type Handle struct {
-	path string
+	path   string
+	record Record
 }
 
 type Record struct {
-	RunID     string    `json:"run_id"`
-	JobID     string    `json:"job_id"`
-	Line      int       `json:"line"`
-	Schedule  string    `json:"schedule"`
-	Timezone  string    `json:"timezone,omitempty"`
-	CWD       string    `json:"cwd"`
-	Prompt    string    `json:"prompt"`
-	StartedAt time.Time `json:"started_at"`
-	PID       int       `json:"pid"`
+	RunID      string    `json:"run_id"`
+	JobID      string    `json:"job_id"`
+	Line       int       `json:"line"`
+	Schedule   string    `json:"schedule"`
+	Timezone   string    `json:"timezone,omitempty"`
+	CWD        string    `json:"cwd"`
+	Prompt     string    `json:"prompt"`
+	StartedAt  time.Time `json:"started_at"`
+	OutputPath string    `json:"output_path,omitempty"`
+	PID        int       `json:"pid"`
 }
 
 type Job struct {
@@ -47,6 +49,7 @@ type Job struct {
 	Prompt         string    `json:"prompt"`
 	StartedAt      time.Time `json:"started_at"`
 	DurationMillis int64     `json:"duration_millis"`
+	OutputPath     string    `json:"output_path,omitempty"`
 	PID            int       `json:"pid"`
 }
 
@@ -67,16 +70,30 @@ func (s Store) Begin(job parser.Job) (*Handle, error) {
 	}
 
 	started := time.Now()
+	runID := runID(job.ID, started)
+	outputPath := ""
+	if s.paths.LogDir != "" {
+		outputPath = filepath.Join(s.paths.LogDir, runID+".log")
+		outputFile, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		if err := outputFile.Close(); err != nil {
+			return nil, err
+		}
+	}
+
 	record := Record{
-		RunID:     runID(job.ID, started),
-		JobID:     job.ID,
-		Line:      job.Line,
-		Schedule:  job.Schedule,
-		Timezone:  job.Timezone,
-		CWD:       job.CWD,
-		Prompt:    job.Prompt,
-		StartedAt: started,
-		PID:       os.Getpid(),
+		RunID:      runID,
+		JobID:      job.ID,
+		Line:       job.Line,
+		Schedule:   job.Schedule,
+		Timezone:   job.Timezone,
+		CWD:        job.CWD,
+		Prompt:     job.Prompt,
+		StartedAt:  started,
+		OutputPath: outputPath,
+		PID:        os.Getpid(),
 	}
 
 	path := filepath.Join(s.paths.ActiveDir, record.RunID+".json")
@@ -93,7 +110,21 @@ func (s Store) Begin(job parser.Job) (*Handle, error) {
 		return nil, err
 	}
 
-	return &Handle{path: path}, nil
+	return &Handle{path: path, record: record}, nil
+}
+
+func (h *Handle) StartedAt() time.Time {
+	if h == nil {
+		return time.Time{}
+	}
+	return h.record.StartedAt
+}
+
+func (h *Handle) OutputPath() string {
+	if h == nil {
+		return ""
+	}
+	return h.record.OutputPath
 }
 
 func (h *Handle) End() error {
@@ -146,6 +177,7 @@ func (s Store) Summary() (Summary, error) {
 			Prompt:         record.Prompt,
 			StartedAt:      record.StartedAt,
 			DurationMillis: now.Sub(record.StartedAt).Milliseconds(),
+			OutputPath:     record.OutputPath,
 			PID:            record.PID,
 		})
 	}

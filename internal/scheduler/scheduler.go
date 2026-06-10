@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -173,11 +174,28 @@ func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Run
 		return
 	}
 
-	result := runner.Run(ctx, job)
+	var liveWriter io.Writer
+	var liveOutput *os.File
+	if handle != nil && handle.OutputPath() != "" {
+		liveOutput, err = os.OpenFile(handle.OutputPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "looptab live output failed: %v\n", err)
+		} else {
+			liveWriter = liveOutput
+		}
+	}
+
+	result := runner.RunWithOutput(ctx, job, handle.StartedAt(), liveWriter)
+	if liveOutput != nil {
+		_ = liveOutput.Close()
+	}
 	record, err := runlog.RecordFromResult(job, result)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "looptab log failed: %v\n", err)
 		return
+	}
+	if handle != nil {
+		record.OutputPath = handle.OutputPath()
 	}
 	if err := store.Save(record, result.Output); err != nil {
 		fmt.Fprintf(os.Stderr, "looptab log failed: %v\n", err)

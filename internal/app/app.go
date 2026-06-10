@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -52,6 +53,8 @@ func Run(args []string, version string) error {
 		return runCommand(p, args[1:])
 	case "logs":
 		return logsCommand(p, args[1:])
+	case "inspect":
+		return inspectCommand(p, args[1:])
 	case "status":
 		return statusCommand(p, args[1:])
 	case "service":
@@ -142,10 +145,28 @@ func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
 	} else {
 		defer handle.End()
 	}
-	result := runner.Run(context.Background(), job)
+
+	var liveWriter io.Writer
+	var liveOutput *os.File
+	if handle != nil && handle.OutputPath() != "" {
+		liveOutput, err = os.OpenFile(handle.OutputPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "looptab live output failed: %v\n", err)
+		} else {
+			liveWriter = liveOutput
+		}
+	}
+
+	result := runner.RunWithOutput(context.Background(), job, handle.StartedAt(), liveWriter)
+	if liveOutput != nil {
+		_ = liveOutput.Close()
+	}
 	record, outputErr := runlog.RecordFromResult(job, result)
 	if outputErr != nil {
 		return outputErr
+	}
+	if handle != nil {
+		record.OutputPath = handle.OutputPath()
 	}
 	if err := store.Save(record, result.Output); err != nil {
 		return err
@@ -216,6 +237,195 @@ func logsCommand(p paths.Paths, args []string) error {
 		return store.PrintJob(os.Stdout, args[1])
 	}
 	return errors.New("expected `looptab logs` or `looptab logs job <id>`")
+}
+
+func inspectCommand(p paths.Paths, args []string) error {
+	if len(args) > 1 {
+		return errors.New("expected `looptab inspect` or `looptab inspect <job-or-run-id>`")
+	}
+
+	id := ""
+	if len(args) == 1 {
+		id = args[0]
+	}
+
+	activeStore := active.NewStore(p)
+	summary, err := activeStore.Summary()
+	if err != nil {
+		return err
+	}
+
+	activeJob, found, err := selectActiveJob(summary.Jobs, id)
+	if err != nil {
+		return err
+	}
+	if found {
+		return inspectActiveRun(p, activeJob, os.Stdout)
+	}
+
+	if id == "" {
+		if summary.Count == 0 {
+			fmt.Fprintln(os.Stdout, "No looptab Codex runs are active.")
+			fmt.Fprintln(os.Stdout, "Use `looptab logs` to inspect completed runs.")
+			return nil
+		}
+		if err := activeStore.Print(os.Stdout); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "\ninspect one with:")
+		fmt.Fprintln(os.Stdout, "  looptab inspect <job>")
+		return nil
+	}
+
+	return inspectCompletedRun(p, id, os.Stdout)
+}
+
+func selectActiveJob(jobs []active.Job, id string) (active.Job, bool, error) {
+	if id == "" {
+		if len(jobs) == 1 {
+			return jobs[0], true, nil
+		}
+		return active.Job{}, false, nil
+	}
+
+	var matches []active.Job
+	for _, job := range jobs {
+		if matchesRunID(job.RunID, id) || matchesRunID(job.JobID, id) {
+			matches = append(matches, job)
+		}
+	}
+	if len(matches) == 0 {
+		return active.Job{}, false, nil
+	}
+	if len(matches) > 1 {
+		return active.Job{}, false, fmt.Errorf("active run id prefix is ambiguous: %s", id)
+	}
+	return matches[0], true, nil
+}
+
+func inspectActiveRun(p paths.Paths, job active.Job, w io.Writer) error {
+	fmt.Fprintf(w, "Active looptab run %s\n", job.RunID)
+	fmt.Fprintf(w, "job: %s\n", job.JobID)
+	fmt.Fprintf(w, "duration: %s\n", formatMillis(job.DurationMillis))
+	fmt.Fprintf(w, "cwd: %s\n", job.CWDDisplay)
+	fmt.Fprintf(w, "prompt: %s\n", job.Prompt)
+	if job.OutputPath == "" {
+		fmt.Fprintln(w, "\nlive output is not available for this run.")
+		fmt.Fprintln(w, "This run started before live inspection was installed.")
+		return nil
+	}
+
+	fmt.Fprintf(w, "output: %s\n\n", job.OutputPath)
+	if err := runlog.PrintTail(w, job.OutputPath, 80); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(w, "  waiting for output...")
+		} else {
+			return err
+		}
+	}
+	fmt.Fprintln(w, "\nfollowing live output; press Ctrl-C to stop inspecting.")
+	return followActiveOutput(p, job, w)
+}
+
+func inspectCompletedRun(p paths.Paths, id string, w io.Writer) error {
+	store := runlog.NewStore(p)
+	records, err := store.Records()
+	if err != nil {
+		return err
+	}
+
+	var matches []runlog.Record
+	for _, record := range records {
+		if matchesRunID(record.RunID, id) || matchesRunID(record.JobID, id) {
+			matches = append(matches, record)
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("no active or completed looptab run found for: %s", id)
+	}
+
+	latest := matches[len(matches)-1]
+	fmt.Fprintf(w, "Looptab run %s\n", latest.RunID)
+	fmt.Fprintf(w, "job: %s\n", latest.JobID)
+	fmt.Fprintf(w, "status: %s\n", latest.Status)
+	fmt.Fprintf(w, "duration: %s\n", formatMillis(latest.DurationMillis))
+	fmt.Fprintf(w, "cwd: %s\n", paths.DisplayPath(latest.CWD))
+	fmt.Fprintf(w, "prompt: %s\n", latest.Prompt)
+	if latest.OutputPath == "" {
+		return errors.New("this run has no output log")
+	}
+	fmt.Fprintf(w, "output: %s\n\n", latest.OutputPath)
+	return runlog.PrintTail(w, latest.OutputPath, 80)
+}
+
+func followActiveOutput(p paths.Paths, job active.Job, w io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	file, err := os.Open(job.OutputPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	offset, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	activePath := filepath.Join(p.ActiveDir, job.RunID+".json")
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			nextOffset, err := copyNewOutput(file, offset, w)
+			if err != nil {
+				return err
+			}
+			offset = nextOffset
+			if _, err := os.Stat(activePath); errors.Is(err, os.ErrNotExist) {
+				_, _ = copyNewOutput(file, offset, w)
+				fmt.Fprintln(w, "\nlooptab run finished.")
+				return nil
+			}
+		}
+	}
+}
+
+func copyNewOutput(file *os.File, offset int64, w io.Writer) (int64, error) {
+	stat, err := file.Stat()
+	if err != nil {
+		return offset, err
+	}
+	if stat.Size() <= offset {
+		return offset, nil
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return offset, err
+	}
+	if _, err := io.CopyN(w, file, stat.Size()-offset); err != nil {
+		return offset, err
+	}
+	return stat.Size(), nil
+}
+
+func matchesRunID(value string, id string) bool {
+	return value == id || strings.HasPrefix(value, id)
+}
+
+func formatMillis(ms int64) string {
+	if ms <= 0 {
+		return "0s"
+	}
+	duration := time.Duration(ms) * time.Millisecond
+	if duration < time.Second {
+		return duration.String()
+	}
+	return duration.Round(time.Second).String()
 }
 
 func serviceCommand(args []string) error {
@@ -422,6 +632,11 @@ features:
   # logs | logs job <id>
   looptab logs
   looptab logs job a1b2c3d4
+
+  inspect live or completed Codex output
+  # inspect | inspect <job-or-run-id>
+  looptab inspect
+  looptab inspect a1b2c3d4
 
   inspect active Codex loops
   # status | status json | status watch

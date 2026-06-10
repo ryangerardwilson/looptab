@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/ryangerardwilson/looptab/internal/parser"
@@ -22,6 +24,32 @@ type Result struct {
 	ExitCode   int
 	Output     string
 	Err        error
+}
+
+type captureWriter struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+	live   io.Writer
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.buffer.Write(p)
+	if w.live == nil {
+		return len(p), nil
+	}
+	if _, err := w.live.Write(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *captureWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buffer.String()
 }
 
 func NewRunner() (Runner, error) {
@@ -52,8 +80,15 @@ func FindBinary() (string, error) {
 }
 
 func (r Runner) Run(ctx context.Context, job parser.Job) Result {
+	return r.RunWithOutput(ctx, job, time.Time{}, nil)
+}
+
+func (r Runner) RunWithOutput(ctx context.Context, job parser.Job, startedAt time.Time, output io.Writer) Result {
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
 	result := Result{
-		StartedAt: time.Now(),
+		StartedAt: startedAt,
 		ExitCode:  -1,
 	}
 
@@ -61,13 +96,13 @@ func (r Runner) Run(ctx context.Context, job parser.Job) Result {
 	cmd.Dir = job.CWD
 	cmd.Env = os.Environ()
 
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	capture := &captureWriter{live: output}
+	cmd.Stdout = capture
+	cmd.Stderr = capture
 
 	err := cmd.Run()
 	result.FinishedAt = time.Now()
-	result.Output = output.String()
+	result.Output = capture.String()
 
 	if err == nil {
 		result.ExitCode = 0

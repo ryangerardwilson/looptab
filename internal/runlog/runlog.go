@@ -129,11 +129,20 @@ func (s Store) Save(record Record, output string) error {
 		return err
 	}
 	if strings.TrimSpace(output) != "" {
-		outputPath, err := s.writeOutput(record.RunID, output)
-		if err != nil {
-			return err
+		if record.OutputPath != "" {
+			info, err := os.Stat(record.OutputPath)
+			if err != nil || info.Size() == 0 {
+				if err := os.WriteFile(record.OutputPath, []byte(output), 0o600); err != nil {
+					return err
+				}
+			}
+		} else {
+			outputPath, err := s.writeOutput(record.RunID, output)
+			if err != nil {
+				return err
+			}
+			record.OutputPath = outputPath
 		}
-		record.OutputPath = outputPath
 	}
 	return s.append(record)
 }
@@ -248,7 +257,7 @@ func (s Store) PrintJob(w io.Writer, id string) error {
 
 	if latest.OutputPath != "" {
 		fmt.Fprintf(w, "\nlatest output: %s\n", latest.OutputPath)
-		if err := printTail(w, latest.OutputPath, 40); err != nil {
+		if err := PrintTail(w, latest.OutputPath, 40); err != nil {
 			return err
 		}
 	}
@@ -350,7 +359,7 @@ func recordLocation(record Record, fallback *time.Location) *time.Location {
 	return time.UTC
 }
 
-func printTail(w io.Writer, path string, limit int) error {
+func PrintTail(w io.Writer, path string, limit int) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
