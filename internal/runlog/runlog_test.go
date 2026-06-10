@@ -131,9 +131,7 @@ func TestStoreWriteMarkdownReportFile(t *testing.T) {
 	text := string(content)
 	for _, want := range []string{
 		"# Looptab Runs",
-		"## Overview",
-		"| 2026-06-10 15:30:00 IST | ok | 1m0s | `abcd1234` |",
-		"## Run Details",
+		"## Runs",
 		"### 1. 2026-06-10 15:30:00 IST - `abcd1234` - ok",
 		"#### Prompt",
 		"    Do useful work and explain the result.",
@@ -150,19 +148,16 @@ func TestStoreWriteMarkdownReportFile(t *testing.T) {
 	if strings.Contains(text, longReport[:72]+"...") {
 		t.Fatalf("markdown report appears truncated:\n%s", text)
 	}
+	for _, unwanted := range []string{"## Overview", "| Started | Status |", "| --- | --- |"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("markdown report still contains table rendering %q:\n%s", unwanted, text)
+		}
+	}
 }
 
 func TestSummarizeUsesLastMeaningfulLine(t *testing.T) {
 	got := Summarize("starting\n\nChanged files and ran tests.\n", "")
 	if got != "Changed files and ran tests." {
 		t.Fatalf("unexpected summary: %q", got)
-	}
-}
-
-func TestEscapeMarkdownTable(t *testing.T) {
-	got := escapeMarkdownTable("``` | done\nnext")
-	want := "\\`\\`\\` \\| done next"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
 	}
 }

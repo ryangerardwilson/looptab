@@ -253,25 +253,7 @@ func (s Store) WriteMarkdownReport(w io.Writer) error {
 		return nil
 	}
 
-	fmt.Fprintln(w, "## Overview")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Started | Status | Duration | Job | CWD | Report |")
-	fmt.Fprintln(w, "| --- | --- | ---: | --- | --- | --- |")
-	for _, record := range records {
-		fmt.Fprintf(
-			w,
-			"| %s | %s | %s | `%s` | `%s` | %s |\n",
-			escapeMarkdownTable(formatWhen(record.StartedAt, recordLocation(record, s.location))),
-			escapeMarkdownTable(record.Status),
-			escapeMarkdownTable(formatDuration(record.DurationMillis)),
-			escapeMarkdownTable(record.JobID),
-			escapeMarkdownTable(paths.DisplayPath(record.CWD)),
-			escapeMarkdownTable(record.Summary),
-		)
-	}
-	fmt.Fprintln(w)
-
-	fmt.Fprintln(w, "## Run Details")
+	fmt.Fprintln(w, "## Runs")
 	for index, record := range records {
 		if err := s.writeMarkdownRun(w, index+1, record); err != nil {
 			return err
@@ -501,14 +483,6 @@ func recordLocation(record Record, fallback *time.Location) *time.Location {
 		return fallback
 	}
 	return time.UTC
-}
-
-func escapeMarkdownTable(input string) string {
-	input = strings.ReplaceAll(input, "\n", " ")
-	input = strings.ReplaceAll(input, "\r", " ")
-	input = strings.ReplaceAll(input, "|", `\|`)
-	input = strings.ReplaceAll(input, "`", "\\`")
-	return strings.TrimSpace(input)
 }
 
 func readOutput(path string) (string, error) {

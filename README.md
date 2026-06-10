@@ -130,7 +130,7 @@ Looptab records every run in:
 ~/.local/state/looptab/active/
 ```
 
-`looptab logs` writes a detailed Markdown report to `~/.local/state/looptab/looptab.md` and opens it in your editor. The report includes an overview table plus one section per run with metadata, full prompt, untruncated report, error details, output log path, and captured Codex output.
+`looptab logs` writes a detailed Markdown report to `~/.local/state/looptab/looptab.md` and opens it in your editor. The report is heading-driven, with one section per run containing metadata, full prompt, untruncated report, error details, output log path, and captured Codex output.
 
 `looptab logs print` prints the compact table:
 
