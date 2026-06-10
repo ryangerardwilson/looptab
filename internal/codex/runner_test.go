@@ -34,7 +34,8 @@ printf 'Codex work summary.\n'
 	job := parser.Job{
 		ID:       "abcd1234",
 		Line:     1,
-		Schedule: "@daily",
+		Schedule: "daily 11am",
+		Timezone: "UTC",
 		CWD:      workdir,
 		Prompt:   "Review the repo.",
 	}

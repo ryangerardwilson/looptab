@@ -79,12 +79,12 @@ func runCommand(p paths.Paths, args []string) error {
 }
 
 func runOneJob(p paths.Paths, id string) error {
-	jobs, err := loadJobs(p)
+	file, err := loadFile(p)
 	if err != nil {
 		return err
 	}
 
-	job, err := parser.FindJob(jobs, id)
+	job, err := parser.FindJob(file.Jobs, id)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func runOneJob(p paths.Paths, id string) error {
 		return err
 	}
 
-	store := runlog.NewStore(p)
+	store := runlog.NewStore(p).WithLocation(file.Location)
 	fmt.Fprintf(os.Stdout, "running job %s from %s\n", job.ID, paths.DisplayPath(job.CWD))
 	result := runner.Run(context.Background(), job)
 	record, outputErr := runlog.RecordFromResult(job, result)
@@ -112,7 +112,11 @@ func runOneJob(p paths.Paths, id string) error {
 }
 
 func logsCommand(p paths.Paths, args []string) error {
-	store := runlog.NewStore(p)
+	location := time.UTC
+	if file, err := loadFile(p); err == nil {
+		location = file.Location
+	}
+	store := runlog.NewStore(p).WithLocation(location)
 	if len(args) == 0 {
 		return store.PrintSummary(os.Stdout)
 	}
@@ -157,7 +161,7 @@ func runCheck(p paths.Paths, w io.Writer) error {
 		return err
 	}
 
-	jobs, err := parser.ParseFile(string(content))
+	file, err := parser.Parse(string(content))
 	if err != nil {
 		return err
 	}
@@ -168,7 +172,7 @@ func runCheck(p paths.Paths, w io.Writer) error {
 	}
 
 	var invalid []string
-	for _, job := range jobs {
+	for _, job := range file.Jobs {
 		info, err := os.Stat(job.CWD)
 		if err != nil {
 			invalid = append(invalid, fmt.Sprintf("line %d: cwd does not exist: %s", job.Line, job.CWD))
@@ -184,24 +188,25 @@ func runCheck(p paths.Paths, w io.Writer) error {
 
 	fmt.Fprintf(w, "looptab check passed\n")
 	fmt.Fprintf(w, "file: %s\n", p.ConfigFile)
-	fmt.Fprintf(w, "jobs: %d\n", len(jobs))
+	fmt.Fprintf(w, "timezone: %s\n", file.Timezone)
+	fmt.Fprintf(w, "jobs: %d\n", len(file.Jobs))
 	fmt.Fprintf(w, "codex: %s\n", codexPath)
-	if len(jobs) > 0 {
+	if len(file.Jobs) > 0 {
 		fmt.Fprintln(w, "")
 		fmt.Fprintln(w, "parsed jobs:")
-		for _, job := range jobs {
+		for _, job := range file.Jobs {
 			fmt.Fprintf(w, "  %s  line %d  %s  %s  %q\n", job.ID, job.Line, job.Schedule, paths.DisplayPath(job.CWD), job.Prompt)
 		}
 	}
 	return nil
 }
 
-func loadJobs(p paths.Paths) ([]parser.Job, error) {
+func loadFile(p paths.Paths) (parser.File, error) {
 	content, err := os.ReadFile(p.ConfigFile)
 	if err != nil {
-		return nil, err
+		return parser.File{}, err
 	}
-	return parser.ParseFile(string(content))
+	return parser.Parse(string(content))
 }
 
 func printHelp(w io.Writer) {
@@ -219,9 +224,14 @@ global actions:
 
 features:
   edit the source-of-truth loop file
-  # <cron> <cwd> "<prompt>"
-  0 * * * * ~/Work/example "Review the repo and fix one small obvious issue."
-  @daily ~/Work/notes "Summarize yesterday's notes and update TODOs."
+  # timezone <IANA name>
+  timezone UTC
+
+  # <when> <cwd> "<prompt>"
+  daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
+  daily 11am,12pm,1pm ~/Work/example "Run a quick maintenance pass."
+  weekdays 9am ~/Work/example "Plan the day and update TODOs."
+  mondays 5am ~/Work/example "Prepare the weekly review."
 
   validate the file and local Codex command
   # check
@@ -257,8 +267,4 @@ func isTTY(file *os.File) bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
-}
-
-func init() {
-	time.Local = time.Now().Location()
 }

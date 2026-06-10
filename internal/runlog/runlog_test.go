@@ -22,7 +22,8 @@ func TestStorePrintSummary(t *testing.T) {
 	record := Record{
 		RunID:          "run-1",
 		JobID:          "abcd1234",
-		Schedule:       "0 * * * *",
+		Schedule:       "daily 11am",
+		Timezone:       "Asia/Kolkata",
 		CWD:            temp,
 		Prompt:         "Do useful work.",
 		StartedAt:      time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC),

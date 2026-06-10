@@ -1,6 +1,6 @@
 # Looptab
 
-Looptab is crontab for Codex loops.
+Looptab is a readable schedule file for Codex loops.
 
 Run `looptab` to edit `~/.config/looptab/looptab`, then let the scheduler invoke Codex from the working directories you name.
 
@@ -15,16 +15,36 @@ Looptab expects the Codex CLI to be available as `codex` on `PATH`. If Codex liv
 
 ## File Format
 
-Each active line has one schedule, one working directory, and one quoted prompt:
+The first non-comment line may set the timezone. If it is omitted, Looptab uses `UTC`.
 
-```cron
-# minute hour day month weekday cwd prompt
-0 * * * * ~/Work/example "Review the repo and fix one small obvious issue."
-30 9 * * 1-5 /home/ryan/Apps/example "Run tests, inspect failures, and make a minimal fix."
-@daily ~/Work/notes "Summarize yesterday's notes and update TODOs."
+Each active job line has one readable schedule, one working directory, and one quoted prompt:
+
+```text
+timezone UTC
+
+daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
+daily 11am,12pm,1pm /home/ryan/Apps/example "Run a quick maintenance pass."
+weekdays 9am ~/Work/example "Plan the day and update TODOs."
+weekends 5am ~/Work/example "Check quiet weekend maintenance."
+mondays 5am ~/Work/example "Prepare the weekly review."
 ```
 
-Supported schedules are standard five-field cron expressions plus descriptors such as `@hourly`, `@daily`, and `@weekly`.
+Supported schedules:
+
+```text
+daily <time[,time...]>
+weekdays <time[,time...]>
+weekends <time[,time...]>
+monday|mondays <time[,time...]>
+tuesday|tuesdays <time[,time...]>
+wednesday|wednesdays <time[,time...]>
+thursday|thursdays <time[,time...]>
+friday|fridays <time[,time...]>
+saturday|saturdays <time[,time...]>
+sunday|sundays <time[,time...]>
+```
+
+Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
 
 The working directory must be absolute or start with `~`. The prompt must be quoted.
 
@@ -35,7 +55,7 @@ looptab
   open ~/.config/looptab/looptab
 
 looptab check
-  validate the loop file, working directories, and Codex binary, then print parsed job IDs
+  validate the loop file, timezone, working directories, and Codex binary, then print parsed job IDs
 
 looptab run
   run the scheduler in the foreground

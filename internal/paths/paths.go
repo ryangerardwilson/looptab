@@ -79,14 +79,19 @@ func sampleConfig() string {
 	return fmt.Sprintf(`# Looptab
 #
 # Format:
-#   <cron> <cwd> "<prompt>"
+#   timezone <IANA name>
+#   <when> <cwd> "<prompt>"
 #
 # Examples:
-#   0 * * * * ~/Work/example "Review the repo and fix one small obvious issue."
-#   @daily ~/Work/notes "Summarize yesterday's notes and update TODOs."
+#   timezone UTC
+#   daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
+#   daily 11am,12pm,1pm ~/Work/example "Run a quick maintenance pass."
+#   weekdays 9am ~/Work/example "Plan the day and update TODOs."
+#   mondays 5am ~/Work/example "Prepare the weekly review."
 #
 # Run:
 #   looptab check
 #   looptab run
+timezone UTC
 `)
 }

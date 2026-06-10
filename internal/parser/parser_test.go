@@ -6,37 +6,81 @@ import (
 	"testing"
 )
 
-func TestParseFile(t *testing.T) {
+func TestParseFileHumanSchedules(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	jobs, err := ParseFile(`
+	file, err := Parse(`
 # comment
-0 * * * * ~/Work/example "Review the repo."
-@daily "` + home + `/Work/notes" "Summarize \"notes\"."
+timezone asia/kolkata
+daily 11am,12pm,1pm ~/Work/example "Review the repo."
+weekdays 9:30am "` + home + `/Work/notes" "Summarize \"notes\"."
+weekends 5am /tmp "Clean temp notes."
+mondays 17:15 /tmp "Prepare the weekly review."
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(jobs) != 2 {
-		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	if file.Timezone != "Asia/Kolkata" {
+		t.Fatalf("unexpected timezone: %s", file.Timezone)
 	}
-	if jobs[0].Schedule != "0 * * * *" {
-		t.Fatalf("unexpected schedule: %s", jobs[0].Schedule)
+	if len(file.Jobs) != 4 {
+		t.Fatalf("expected 4 jobs, got %d", len(file.Jobs))
 	}
-	if !strings.HasPrefix(jobs[0].CWD, home) {
-		t.Fatalf("cwd was not expanded: %s", jobs[0].CWD)
+	if file.Jobs[0].Schedule != "daily 11am,12pm,1pm" {
+		t.Fatalf("unexpected schedule: %s", file.Jobs[0].Schedule)
 	}
-	if jobs[1].Prompt != `Summarize "notes".` {
-		t.Fatalf("unexpected prompt: %q", jobs[1].Prompt)
+	wantSpecs := []string{"0 11 * * *", "0 12 * * *", "0 13 * * *"}
+	for i, want := range wantSpecs {
+		if file.Jobs[0].CronSpecs[i] != want {
+			t.Fatalf("cron spec %d: expected %q, got %q", i, want, file.Jobs[0].CronSpecs[i])
+		}
+	}
+	if !strings.HasPrefix(file.Jobs[0].CWD, home) {
+		t.Fatalf("cwd was not expanded: %s", file.Jobs[0].CWD)
+	}
+	if file.Jobs[1].CronSpecs[0] != "30 9 * * 1-5" {
+		t.Fatalf("unexpected weekday spec: %s", file.Jobs[1].CronSpecs[0])
+	}
+	if file.Jobs[1].Prompt != `Summarize "notes".` {
+		t.Fatalf("unexpected prompt: %q", file.Jobs[1].Prompt)
+	}
+	if file.Jobs[2].CronSpecs[0] != "0 5 * * 0,6" {
+		t.Fatalf("unexpected weekend spec: %s", file.Jobs[2].CronSpecs[0])
+	}
+	if file.Jobs[3].CronSpecs[0] != "15 17 * * 1" {
+		t.Fatalf("unexpected monday spec: %s", file.Jobs[3].CronSpecs[0])
+	}
+}
+
+func TestParseFileDefaultsToUTC(t *testing.T) {
+	file, err := Parse(`daily 11am ~ "Run tests."`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Timezone != "UTC" {
+		t.Fatalf("expected UTC, got %s", file.Timezone)
+	}
+	if file.Location.String() != "UTC" {
+		t.Fatalf("expected UTC location, got %s", file.Location)
+	}
+}
+
+func TestParseFileRejectsOldCronSyntax(t *testing.T) {
+	_, err := Parse(`0 * * * * ~/Work/example "Review the repo."`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "unknown schedule") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestParseFileRejectsUnquotedPrompt(t *testing.T) {
-	_, err := ParseFile(`0 * * * * ~/Work/example Review the repo.`)
+	_, err := Parse(`daily 11am ~/Work/example Review the repo.`)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
@@ -46,17 +90,30 @@ func TestParseFileRejectsUnquotedPrompt(t *testing.T) {
 }
 
 func TestParseFileRejectsRelativeCWD(t *testing.T) {
-	_, err := ParseFile(`0 * * * * ./example "Run tests."`)
+	_, err := Parse(`daily 11am ./example "Run tests."`)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	if !strings.Contains(err.Error(), "cwd must be absolute") {
+	if !strings.Contains(err.Error(), "expected <when> <cwd>") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseFileRejectsTimezoneAfterJobs(t *testing.T) {
+	_, err := Parse(`
+daily 11am ~ "Run tests."
+timezone Asia/Kolkata
+`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "timezone must appear before jobs") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestFindJobByPrefix(t *testing.T) {
-	jobs, err := ParseFile(`0 * * * * ~ "Run tests."`)
+	jobs, err := ParseFile(`daily 11am ~ "Run tests."`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,16 +34,16 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 	store := runlog.NewStore(s.paths)
 
-	jobs, mtime, err := s.loadJobs()
+	file, mtime, err := s.loadFile()
 	if err != nil {
 		return err
 	}
 
-	active, err := s.startCron(ctx, jobs, runner, store)
+	active, err := s.startCron(ctx, file, runner, store)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "looptab running: %d jobs from %s\n", len(jobs), s.paths.ConfigFile)
+	fmt.Fprintf(os.Stdout, "looptab running: %d jobs from %s in %s\n", len(file.Jobs), s.paths.ConfigFile, file.Timezone)
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -64,52 +64,54 @@ func (s *Scheduler) Run(ctx context.Context) error {
 				continue
 			}
 
-			nextJobs, nextMTime, err := s.loadJobs()
+			nextFile, nextMTime, err := s.loadFile()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "looptab reload failed:\n%v\n", err)
 				continue
 			}
 
 			active.Stop()
-			active, err = s.startCron(ctx, nextJobs, runner, store)
+			active, err = s.startCron(ctx, nextFile, runner, store)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "looptab reload failed: %v\n", err)
 				continue
 			}
-			jobs = nextJobs
+			file = nextFile
 			mtime = nextMTime
-			fmt.Fprintf(os.Stdout, "looptab reloaded: %d jobs\n", len(jobs))
+			fmt.Fprintf(os.Stdout, "looptab reloaded: %d jobs in %s\n", len(file.Jobs), file.Timezone)
 		}
 	}
 }
 
-func (s *Scheduler) loadJobs() ([]parser.Job, time.Time, error) {
+func (s *Scheduler) loadFile() (parser.File, time.Time, error) {
 	content, err := os.ReadFile(s.paths.ConfigFile)
 	if err != nil {
-		return nil, time.Time{}, err
+		return parser.File{}, time.Time{}, err
 	}
 	stat, err := os.Stat(s.paths.ConfigFile)
 	if err != nil {
-		return nil, time.Time{}, err
+		return parser.File{}, time.Time{}, err
 	}
-	jobs, err := parser.ParseFile(string(content))
-	return jobs, stat.ModTime(), err
+	file, err := parser.Parse(string(content))
+	return file, stat.ModTime(), err
 }
 
-func (s *Scheduler) startCron(ctx context.Context, jobs []parser.Job, runner codex.Runner, store runlog.Store) (*cron.Cron, error) {
+func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner codex.Runner, store runlog.Store) (*cron.Cron, error) {
 	parserSpec := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(
 		cron.WithParser(parserSpec),
-		cron.WithLocation(time.Local),
+		cron.WithLocation(file.Location),
 		cron.WithChain(cron.Recover(cron.DefaultLogger)),
 	)
 
-	for _, job := range jobs {
+	for _, job := range file.Jobs {
 		localJob := job
-		if _, err := c.AddFunc(localJob.Schedule, func() {
-			s.runJob(ctx, localJob, runner, store)
-		}); err != nil {
-			return nil, err
+		for _, spec := range localJob.CronSpecs {
+			if _, err := c.AddFunc(spec, func() {
+				s.runJob(ctx, localJob, runner, store)
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 

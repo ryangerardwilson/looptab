@@ -20,7 +20,8 @@ import (
 )
 
 type Store struct {
-	paths paths.Paths
+	paths    paths.Paths
+	location *time.Location
 }
 
 type Record struct {
@@ -28,6 +29,7 @@ type Record struct {
 	JobID          string    `json:"job_id"`
 	Line           int       `json:"line"`
 	Schedule       string    `json:"schedule"`
+	Timezone       string    `json:"timezone,omitempty"`
 	CWD            string    `json:"cwd"`
 	Prompt         string    `json:"prompt"`
 	StartedAt      time.Time `json:"started_at"`
@@ -41,7 +43,14 @@ type Record struct {
 }
 
 func NewStore(p paths.Paths) Store {
-	return Store{paths: p}
+	return Store{paths: p, location: time.UTC}
+}
+
+func (s Store) WithLocation(location *time.Location) Store {
+	if location != nil {
+		s.location = location
+	}
+	return s
 }
 
 func RecordFromResult(job parser.Job, result codex.Result) (Record, error) {
@@ -61,6 +70,7 @@ func RecordFromResult(job parser.Job, result codex.Result) (Record, error) {
 		JobID:          job.ID,
 		Line:           job.Line,
 		Schedule:       job.Schedule,
+		Timezone:       job.Timezone,
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
 		StartedAt:      result.StartedAt,
@@ -81,6 +91,7 @@ func SkippedRecord(job parser.Job, reason string) Record {
 		JobID:          job.ID,
 		Line:           job.Line,
 		Schedule:       job.Schedule,
+		Timezone:       job.Timezone,
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
 		StartedAt:      now,
@@ -100,6 +111,7 @@ func FailedRecord(job parser.Job, reason string) Record {
 		JobID:          job.ID,
 		Line:           job.Line,
 		Schedule:       job.Schedule,
+		Timezone:       job.Timezone,
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
 		StartedAt:      now,
@@ -175,7 +187,7 @@ func (s Store) PrintSummary(w io.Writer) error {
 		fmt.Fprintf(
 			tw,
 			"%s\t%s\t%s\t%s\t%s\t%s\n",
-			record.StartedAt.Local().Format("2006-01-02 15:04:05 MST"),
+			formatWhen(record.StartedAt, recordLocation(record, s.location)),
 			record.Status,
 			formatDuration(record.DurationMillis),
 			record.JobID,
@@ -212,6 +224,9 @@ func (s Store) PrintJob(w io.Writer, id string) error {
 	latest := matches[len(matches)-1]
 	fmt.Fprintf(w, "Job %s\n", jobID)
 	fmt.Fprintf(w, "schedule: %s\n", latest.Schedule)
+	if latest.Timezone != "" {
+		fmt.Fprintf(w, "timezone: %s\n", latest.Timezone)
+	}
 	fmt.Fprintf(w, "cwd: %s\n", paths.DisplayPath(latest.CWD))
 	fmt.Fprintf(w, "prompt: %s\n\n", latest.Prompt)
 
@@ -221,7 +236,7 @@ func (s Store) PrintJob(w io.Writer, id string) error {
 		fmt.Fprintf(
 			tw,
 			"%s\t%s\t%s\t%s\n",
-			record.StartedAt.Local().Format("2006-01-02 15:04:05 MST"),
+			formatWhen(record.StartedAt, recordLocation(record, s.location)),
 			record.Status,
 			formatDuration(record.DurationMillis),
 			truncate(record.Summary, 90),
@@ -317,6 +332,22 @@ func formatDuration(ms int64) string {
 		return duration.String()
 	}
 	return duration.Round(time.Second).String()
+}
+
+func formatWhen(when time.Time, location *time.Location) string {
+	return when.In(location).Format("2006-01-02 15:04:05 MST")
+}
+
+func recordLocation(record Record, fallback *time.Location) *time.Location {
+	if record.Timezone != "" {
+		if location, err := time.LoadLocation(record.Timezone); err == nil {
+			return location
+		}
+	}
+	if fallback != nil {
+		return fallback
+	}
+	return time.UTC
 }
 
 func printTail(w io.Writer, path string, limit int) error {
