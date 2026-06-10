@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -205,6 +206,18 @@ func (s Store) PrintSummary(w io.Writer) error {
 		)
 	}
 	return tw.Flush()
+}
+
+func (s Store) WriteSummaryFile(path string) error {
+	if err := paths.EnsureState(s.paths); err != nil {
+		return err
+	}
+
+	var out bytes.Buffer
+	if err := s.PrintSummary(&out); err != nil {
+		return err
+	}
+	return os.WriteFile(path, out.Bytes(), 0o600)
 }
 
 func (s Store) PrintJob(w io.Writer, id string) error {

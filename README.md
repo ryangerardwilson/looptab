@@ -78,7 +78,10 @@ looptab run job <id>
   run one parsed job immediately
 
 looptab logs
-  show a formatted history of all Codex loop runs
+  open the formatted run history log in your editor
+
+looptab logs print
+  print the formatted run history to stdout
 
 looptab logs job <id>
   show one job's run history and latest output tail
@@ -116,7 +119,7 @@ Looptab records every run in:
 ~/.local/state/looptab/active/
 ```
 
-`looptab logs` prints a summary table:
+`looptab logs` writes this summary to `~/.local/state/looptab/looptab.log` and opens it in your editor. `looptab logs print` prints the same table:
 
 ```text
 Looptab runs
