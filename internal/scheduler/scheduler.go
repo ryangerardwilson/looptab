@@ -106,6 +106,10 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner code
 
 	for _, job := range file.Jobs {
 		localJob := job
+		if localJob.Once {
+			go s.runJob(ctx, localJob, runner, store)
+			continue
+		}
 		for _, spec := range localJob.CronSpecs {
 			if _, err := c.AddFunc(spec, func() {
 				s.runJob(ctx, localJob, runner, store)

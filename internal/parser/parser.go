@@ -28,6 +28,7 @@ type Job struct {
 	Line      int
 	Schedule  string
 	CronSpecs []string
+	Once      bool
 	Timezone  string
 	CWD       string
 	Prompt    string
@@ -135,7 +136,7 @@ func parseLine(lineNumber int, line string, timezone string) (Job, error) {
 		return Job{}, lineErr(lineNumber, err.Error())
 	}
 
-	cronSpecs, err := compileSchedule(schedule)
+	cronSpecs, once, err := compileSchedule(schedule)
 	if err != nil {
 		return Job{}, lineErr(lineNumber, err.Error())
 	}
@@ -150,6 +151,7 @@ func parseLine(lineNumber int, line string, timezone string) (Job, error) {
 		Line:      lineNumber,
 		Schedule:  schedule,
 		CronSpecs: cronSpecs,
+		Once:      once,
 		Timezone:  timezone,
 		CWD:       expanded,
 		Prompt:    prompt,
@@ -221,26 +223,25 @@ func splitJobLine(line string) (string, string, string, error) {
 		return "", "", "", err
 	}
 	if len(tokens) == 0 {
-		return "", "", "", errors.New("expected <when> <cwd> \"<prompt>\"")
+		return "", "", "", errors.New("expected <when> [cwd] \"<prompt>\"")
 	}
 
-	cwdIndex := -1
+	promptIndex := -1
 	for i, tok := range tokens {
-		if isCWDToken(tok.value) {
-			cwdIndex = i
+		if !tok.quoted && strings.HasPrefix(tok.value, "#") {
 			break
 		}
+		if tok.quoted {
+			promptIndex = i
+		}
 	}
-	if cwdIndex <= 0 {
-		return "", "", "", errors.New("expected <when> <cwd> \"<prompt>\"")
-	}
-	if cwdIndex+1 >= len(tokens) {
-		return "", "", "", errors.New("expected quoted prompt after cwd")
+	if promptIndex < 0 {
+		return "", "", "", errors.New("prompt must be quoted")
 	}
 
-	promptToken := tokens[cwdIndex+1]
-	if !promptToken.quoted {
-		return "", "", "", errors.New("prompt must be quoted")
+	promptToken := tokens[promptIndex]
+	if promptToken.value == "" {
+		return "", "", "", errors.New("prompt must not be empty")
 	}
 
 	trailing := strings.TrimSpace(line[promptToken.end:])
@@ -248,12 +249,24 @@ func splitJobLine(line string) (string, string, string, error) {
 		return "", "", "", fmt.Errorf("unexpected trailing text after prompt: %s", trailing)
 	}
 
-	schedule := strings.Join(strings.Fields(line[:tokens[cwdIndex].start]), " ")
+	cwd := "~"
+	scheduleEnd := promptToken.start
+	if promptIndex > 0 {
+		previous := tokens[promptIndex-1]
+		if isCWDToken(previous.value) {
+			cwd = previous.value
+			scheduleEnd = previous.start
+		} else if looksLikePath(previous.value) {
+			return "", "", "", errors.New("cwd must be absolute or start with ~")
+		}
+	}
+
+	schedule := strings.Join(strings.Fields(line[:scheduleEnd]), " ")
 	if schedule == "" {
 		return "", "", "", errors.New("expected schedule before cwd")
 	}
 
-	return schedule, tokens[cwdIndex].value, promptToken.value, nil
+	return schedule, cwd, promptToken.value, nil
 }
 
 func scanTokens(input string) ([]token, error) {
@@ -321,22 +334,41 @@ func isCWDToken(value string) bool {
 	return value == "~" || strings.HasPrefix(value, "~/") || filepath.IsAbs(value)
 }
 
-func compileSchedule(input string) ([]string, error) {
+func looksLikePath(value string) bool {
+	return value == "." ||
+		value == ".." ||
+		strings.HasPrefix(value, "./") ||
+		strings.HasPrefix(value, "../") ||
+		strings.Contains(value, "/")
+}
+
+func compileSchedule(input string) ([]string, bool, error) {
 	parts := strings.Fields(input)
-	if len(parts) < 2 {
-		return nil, errors.New("expected schedule like `daily 11am`")
+	if len(parts) == 0 {
+		return nil, false, errors.New("expected schedule like `daily 11am` or `now`")
 	}
 
 	frequency := strings.ToLower(parts[0])
+	if frequency == "now" {
+		if len(parts) > 1 {
+			return nil, false, errors.New("now does not accept a time")
+		}
+		return nil, true, nil
+	}
+
+	if len(parts) < 2 {
+		return nil, false, errors.New("expected schedule like `daily 11am` or `now`")
+	}
+
 	daySpec, err := compileDaySpec(frequency)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	timesText := strings.TrimSpace(strings.TrimPrefix(input, parts[0]))
 	times, err := parseTimeList(timesText)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	specs := make([]string, 0, len(times))
@@ -348,13 +380,13 @@ func compileSchedule(input string) ([]string, error) {
 			continue
 		}
 		if _, err := cronParser.Parse(spec); err != nil {
-			return nil, fmt.Errorf("compiled invalid schedule %q: %w", spec, err)
+			return nil, false, fmt.Errorf("compiled invalid schedule %q: %w", spec, err)
 		}
 		specs = append(specs, spec)
 		seen[spec] = true
 	}
 
-	return specs, nil
+	return specs, false, nil
 }
 
 func compileDaySpec(frequency string) (string, error) {

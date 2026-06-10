@@ -19,6 +19,7 @@ daily 11am,12pm,1pm ~/Work/example "Review the repo."
 weekdays 9:30am "` + home + `/Work/notes" "Summarize \"notes\"."
 weekends 5am /tmp "Clean temp notes."
 mondays 17:15 /tmp "Prepare the weekly review."
+now "Run once from home."
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -27,8 +28,8 @@ mondays 17:15 /tmp "Prepare the weekly review."
 	if file.Timezone != "Asia/Kolkata" {
 		t.Fatalf("unexpected timezone: %s", file.Timezone)
 	}
-	if len(file.Jobs) != 4 {
-		t.Fatalf("expected 4 jobs, got %d", len(file.Jobs))
+	if len(file.Jobs) != 5 {
+		t.Fatalf("expected 5 jobs, got %d", len(file.Jobs))
 	}
 	if file.Jobs[0].Schedule != "daily 11am,12pm,1pm" {
 		t.Fatalf("unexpected schedule: %s", file.Jobs[0].Schedule)
@@ -54,10 +55,19 @@ mondays 17:15 /tmp "Prepare the weekly review."
 	if file.Jobs[3].CronSpecs[0] != "15 17 * * 1" {
 		t.Fatalf("unexpected monday spec: %s", file.Jobs[3].CronSpecs[0])
 	}
+	if !file.Jobs[4].Once {
+		t.Fatal("expected now job to be marked once")
+	}
+	if file.Jobs[4].Schedule != "now" {
+		t.Fatalf("unexpected now schedule: %s", file.Jobs[4].Schedule)
+	}
+	if file.Jobs[4].CWD != home {
+		t.Fatalf("expected default cwd %s, got %s", home, file.Jobs[4].CWD)
+	}
 }
 
 func TestParseFileDefaultsToUTC(t *testing.T) {
-	file, err := Parse(`daily 11am ~ "Run tests."`)
+	file, err := Parse(`daily 11am "Run tests."`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +76,24 @@ func TestParseFileDefaultsToUTC(t *testing.T) {
 	}
 	if file.Location.String() != "UTC" {
 		t.Fatalf("expected UTC location, got %s", file.Location)
+	}
+}
+
+func TestParseFileUsesHomeWhenCWDIsOmitted(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := Parse(`weekdays 9am "Plan the day."`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Jobs[0].CWD != home {
+		t.Fatalf("expected cwd %s, got %s", home, file.Jobs[0].CWD)
+	}
+	if file.Jobs[0].Schedule != "weekdays 9am" {
+		t.Fatalf("unexpected schedule: %s", file.Jobs[0].Schedule)
 	}
 }
 
@@ -94,7 +122,17 @@ func TestParseFileRejectsRelativeCWD(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	if !strings.Contains(err.Error(), "expected <when> <cwd>") {
+	if !strings.Contains(err.Error(), "cwd must be absolute or start with ~") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseFileRejectsNowWithTime(t *testing.T) {
+	_, err := Parse(`now 11am "Run tests."`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "now does not accept a time") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -113,7 +151,7 @@ timezone Asia/Kolkata
 }
 
 func TestFindJobByPrefix(t *testing.T) {
-	jobs, err := ParseFile(`daily 11am ~ "Run tests."`)
+	jobs, err := ParseFile(`daily 11am "Run tests."`)
 	if err != nil {
 		t.Fatal(err)
 	}

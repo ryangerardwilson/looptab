@@ -80,10 +80,12 @@ func sampleConfig() string {
 #
 # Format:
 #   timezone <IANA name>
-#   <when> <cwd> "<prompt>"
+#   <when> [cwd] "<prompt>"
 #
 # Examples:
 #   timezone UTC
+#   now "Run once from home when looptab loads."
+#   daily 11am "Review from home and fix one small obvious issue."
 #   daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
 #   daily 11am,12pm,1pm ~/Work/example "Run a quick maintenance pass."
 #   weekdays 9am ~/Work/example "Plan the day and update TODOs."

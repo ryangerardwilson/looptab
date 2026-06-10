@@ -17,11 +17,14 @@ Looptab expects the Codex CLI to be available as `codex` on `PATH`. If Codex liv
 
 The first non-comment line may set the timezone. If it is omitted, Looptab uses `UTC`.
 
-Each active job line has one readable schedule, one working directory, and one quoted prompt:
+Each active job line has one readable schedule, an optional working directory, and one quoted prompt. When the directory is omitted, Looptab runs Codex from `~`.
 
 ```text
 timezone UTC
 
+now "Run once from home when looptab loads."
+now ~/Work/example "Run once from this repo when looptab loads."
+daily 11am "Review from home and fix one small obvious issue."
 daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
 daily 11am,12pm,1pm /home/ryan/Apps/example "Run a quick maintenance pass."
 weekdays 9am ~/Work/example "Plan the day and update TODOs."
@@ -32,6 +35,7 @@ mondays 5am ~/Work/example "Prepare the weekly review."
 Supported schedules:
 
 ```text
+now
 daily <time[,time...]>
 weekdays <time[,time...]>
 weekends <time[,time...]>
@@ -44,9 +48,11 @@ saturday|saturdays <time[,time...]>
 sunday|sundays <time[,time...]>
 ```
 
+`now` runs once each time `looptab run` loads the file. If you edit and save the file while the scheduler is running, `now` jobs in the new file run once after that reload.
+
 Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
 
-The working directory must be absolute or start with `~`. The prompt must be quoted.
+When present, the working directory must be absolute or start with `~`. The prompt must be quoted.
 
 ## Commands
 
