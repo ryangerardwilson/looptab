@@ -14,9 +14,11 @@ install_from_source() {
 install_from_binary() {
   src="$1"
   dest="${HOME}/.local/bin"
+  tmp="${dest}/.looptab.tmp.$$"
   mkdir -p "$dest"
-  cp "$src" "$dest/looptab"
-  chmod 0755 "$dest/looptab"
+  cp "$src" "$tmp"
+  chmod 0755 "$tmp"
+  mv "$tmp" "$dest/looptab"
 }
 
 if [ "$#" -eq 0 ]; then
@@ -41,4 +43,3 @@ echo "usage:" >&2
 echo "  ./install.sh" >&2
 echo "  ./install.sh from <source-checkout-or-binary>" >&2
 exit 1
-

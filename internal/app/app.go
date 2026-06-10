@@ -35,7 +35,7 @@ func Run(args []string, version string) error {
 		if err := editor.Open(p.ConfigFile); err != nil {
 			return err
 		}
-		return printNowNotice(p, os.Stdout)
+		return ensureSchedulerAfterEdit(p, os.Stdout)
 	}
 
 	switch args[0] {
@@ -275,6 +275,39 @@ func printNowNotice(p paths.Paths, w io.Writer) error {
 	return nil
 }
 
+func ensureSchedulerAfterEdit(p paths.Paths, w io.Writer) error {
+	file, err := loadFile(p)
+	if err != nil {
+		return err
+	}
+	if len(file.Jobs) == 0 {
+		fmt.Fprintln(w, "No looptab jobs are configured; scheduler was not started.")
+		return nil
+	}
+
+	if schedulerActive(p) {
+		fmt.Fprintln(w, "looptab scheduler is already running.")
+		return nil
+	}
+
+	manager, err := service.NewUserManager()
+	if err != nil {
+		if errors.Is(err, service.ErrUnsupported) {
+			fmt.Fprintln(w, "Looptab background service is not supported here; run `looptab run` to keep the scheduler active.")
+			return nil
+		}
+		return err
+	}
+
+	if err := manager.EnsureStarted(w); err != nil {
+		return err
+	}
+	if len(nowJobs(file)) > 0 {
+		fmt.Fprintln(w, "now jobs will run as the scheduler loads the file.")
+	}
+	return nil
+}
+
 func printNowNoticeForFile(p paths.Paths, file parser.File, w io.Writer) {
 	jobs := nowJobs(file)
 	if len(jobs) == 0 {
@@ -318,7 +351,7 @@ Edit and run Codex loops from ~/.config/looptab/looptab.
 
 global actions:
   looptab
-    open the looptab file
+    open the looptab file, then start the background scheduler when jobs exist
   looptab help
     show this help
   looptab version

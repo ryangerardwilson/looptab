@@ -58,7 +58,7 @@ When present, the working directory must be absolute or start with `~`. The prom
 
 ```text
 looptab
-  open ~/.config/looptab/looptab
+  open ~/.config/looptab/looptab, then start the background scheduler when jobs exist
 
 looptab check
   validate the loop file, timezone, working directories, and Codex binary, then print parsed job IDs
@@ -133,7 +133,9 @@ The JSONL history is the audit trail. The per-run `.log` files contain full Code
 
 ## Background Service
 
-On Linux, install the systemd user service:
+On Linux, `looptab` installs and starts the systemd user service after you edit and save a file with jobs.
+
+You can still manage the service directly:
 
 ```sh
 looptab service install
