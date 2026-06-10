@@ -117,6 +117,83 @@ func TestStreamActiveRunsStreamsActiveOutput(t *testing.T) {
 	}
 }
 
+func TestStreamActiveRunIndexStreamsSelectedJob(t *testing.T) {
+	temp := t.TempDir()
+	p := paths.Paths{
+		StateDir:  temp,
+		ActiveDir: filepath.Join(temp, "active"),
+		LogDir:    filepath.Join(temp, "logs"),
+	}
+	store := active.NewStore(p)
+	first := parser.Job{
+		ID:       "aaaa1111",
+		Line:     1,
+		Schedule: "now",
+		CWD:      temp,
+		Prompt:   "First job.",
+	}
+	second := parser.Job{
+		ID:       "bbbb2222",
+		Line:     2,
+		Schedule: "now",
+		CWD:      temp,
+		Prompt:   "Second job.",
+	}
+
+	firstHandle, err := store.Begin(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstHandle.End()
+	secondHandle, err := store.Begin(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondHandle.End()
+
+	if err := os.WriteFile(firstHandle.OutputPath(), []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondHandle.OutputPath(), []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var out lockedBuffer
+	done := make(chan error, 1)
+	go func() {
+		done <- streamActiveRunIndex(ctx, store, &out, 10*time.Millisecond, 0)
+	}()
+
+	waitForOutput(t, &out, "[aaaa1111] first\n")
+	if strings.Contains(out.String(), "[bbbb2222] second") {
+		t.Fatalf("stream included unselected job:\n%s", out.String())
+	}
+
+	appendOutput(t, firstHandle.OutputPath(), "first-next\n")
+	appendOutput(t, secondHandle.OutputPath(), "second-next\n")
+	waitForOutput(t, &out, "[aaaa1111] first-next\n")
+	if strings.Contains(out.String(), "[bbbb2222] second-next") {
+		t.Fatalf("stream included unselected appended output:\n%s", out.String())
+	}
+
+	if err := firstHandle.End(); err != nil {
+		t.Fatal(err)
+	}
+	waitForOutput(t, &out, "[aaaa1111] finished")
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("indexed stream did not stop after selected job finished")
+	}
+}
+
 func appendOutput(t *testing.T, path string, text string) {
 	t.Helper()
 

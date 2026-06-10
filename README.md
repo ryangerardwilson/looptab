@@ -96,6 +96,9 @@ looptab inspect <job-or-run-id>
 looptab stream
   stream live Codex output across all active loops
 
+looptab stream <index>
+  stream live Codex output for one active loop by the index shown in `looptab status`
+
 looptab kill <index>
   kill one active Codex loop by the index shown in `looptab status`
 
@@ -151,9 +154,11 @@ To watch all active jobs at once:
 
 ```sh
 looptab stream
+looptab stream 0
 ```
 
 `looptab stream` waits when no loops are active. When a loop starts, it prints the latest live output for that run, prefixes streamed lines with the job ID, and keeps following all active loops until you press `Ctrl-C`.
+`looptab stream 0` streams only active index `0` from `looptab status` and exits when that run finishes.
 
 To stop one active loop:
 

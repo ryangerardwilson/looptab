@@ -302,14 +302,23 @@ func inspectCommand(p paths.Paths, args []string) error {
 }
 
 func streamCommand(p paths.Paths, args []string) error {
-	if len(args) != 0 {
-		return errors.New("expected `looptab stream`")
+	if len(args) > 1 {
+		return errors.New("expected `looptab stream [index]`")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return streamActiveRuns(ctx, active.NewStore(p), os.Stdout, 250*time.Millisecond)
+	store := active.NewStore(p)
+	if len(args) == 0 {
+		return streamActiveRuns(ctx, store, os.Stdout, 250*time.Millisecond)
+	}
+
+	index, err := strconv.Atoi(args[0])
+	if err != nil || index < 0 {
+		return fmt.Errorf("expected active job index, got %q", args[0])
+	}
+	return streamActiveRunIndex(ctx, store, os.Stdout, 250*time.Millisecond, index)
 }
 
 func killCommand(p paths.Paths, args []string) error {
@@ -501,6 +510,62 @@ func streamActiveRuns(ctx context.Context, store active.Store, w io.Writer, inte
 		case <-ticker.C:
 		}
 	}
+}
+
+func streamActiveRunIndex(ctx context.Context, store active.Store, w io.Writer, interval time.Duration, index int) error {
+	summary, err := store.Summary()
+	if err != nil {
+		return err
+	}
+	if summary.Count == 0 {
+		fmt.Fprintln(w, "No looptab Codex runs are active.")
+		return nil
+	}
+	if index >= len(summary.Jobs) {
+		return fmt.Errorf("active job index %d is not running; use `looptab status`", index)
+	}
+
+	stream, err := openRunStream(summary.Jobs[index], w)
+	if err != nil {
+		return err
+	}
+	defer stream.close()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		if err := stream.copyNew(w); err != nil {
+			return err
+		}
+
+		summary, err := store.Summary()
+		if err != nil {
+			return err
+		}
+		if !summaryHasRun(summary, stream.job.RunID) {
+			if err := stream.copyNew(w); err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "\n[%s] finished\n", stream.job.JobID)
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func summaryHasRun(summary active.Summary, runID string) bool {
+	for _, job := range summary.Jobs {
+		if job.RunID == runID {
+			return true
+		}
+	}
+	return false
 }
 
 func openRunStream(job active.Job, w io.Writer) (*runStream, error) {
@@ -983,9 +1048,10 @@ features:
   looptab inspect
   looptab inspect a1b2c3d4
 
-  stream live Codex output across all active loops
-  # stream
+  stream live Codex output across all active loops or one active index
+  # stream [index]
   looptab stream
+  looptab stream 0
 
   kill an active loop by status index
   # kill <index>
