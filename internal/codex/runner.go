@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ryangerardwilson/looptab/internal/parser"
@@ -84,6 +85,10 @@ func (r Runner) Run(ctx context.Context, job parser.Job) Result {
 }
 
 func (r Runner) RunWithOutput(ctx context.Context, job parser.Job, startedAt time.Time, output io.Writer) Result {
+	return r.RunWithOutputAndPID(ctx, job, startedAt, output, nil)
+}
+
+func (r Runner) RunWithOutputAndPID(ctx context.Context, job parser.Job, startedAt time.Time, output io.Writer, onStart func(int)) Result {
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
@@ -95,12 +100,28 @@ func (r Runner) RunWithOutput(ctx context.Context, job parser.Job, startedAt tim
 	cmd := exec.CommandContext(ctx, r.Bin, "exec", "--color", "never", "--cd", job.CWD, job.Prompt)
 	cmd.Dir = job.CWD
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	capture := &captureWriter{live: output}
 	cmd.Stdout = capture
 	cmd.Stderr = capture
 
-	err := cmd.Run()
+	err := cmd.Start()
+	if err != nil {
+		result.FinishedAt = time.Now()
+		result.Output = capture.String()
+		if ctx.Err() != nil {
+			result.Err = ctx.Err()
+		} else {
+			result.Err = err
+		}
+		return result
+	}
+	if onStart != nil {
+		onStart(cmd.Process.Pid)
+	}
+
+	err = cmd.Wait()
 	result.FinishedAt = time.Now()
 	result.Output = capture.String()
 

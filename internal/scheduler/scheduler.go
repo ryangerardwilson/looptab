@@ -11,6 +11,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/ryangerardwilson/looptab/internal/active"
 	"github.com/ryangerardwilson/looptab/internal/codex"
+	"github.com/ryangerardwilson/looptab/internal/oncejob"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
 	"github.com/ryangerardwilson/looptab/internal/runlog"
@@ -125,6 +126,17 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner code
 	for _, job := range file.Jobs {
 		localJob := job
 		if localJob.Once {
+			alreadyAttempted, err := nowJobAlreadyAttempted(store, localJob)
+			if err != nil {
+				return nil, err
+			}
+			claimed, err := oncejob.NewStore(s.paths).Claim(localJob)
+			if err != nil {
+				return nil, err
+			}
+			if alreadyAttempted || !claimed {
+				continue
+			}
 			go s.runJob(ctx, localJob, runner, store)
 			continue
 		}
@@ -139,6 +151,19 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, runner code
 
 	c.Start()
 	return c, nil
+}
+
+func nowJobAlreadyAttempted(store runlog.Store, job parser.Job) (bool, error) {
+	records, err := store.Records()
+	if err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		if record.JobID == job.ID && record.Status != "skipped" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Runner, store runlog.Store) {
@@ -185,7 +210,11 @@ func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Run
 		}
 	}
 
-	result := runner.RunWithOutput(ctx, job, handle.StartedAt(), liveWriter)
+	result := runner.RunWithOutputAndPID(ctx, job, handle.StartedAt(), liveWriter, func(pid int) {
+		if err := handle.SetPID(pid); err != nil {
+			fmt.Fprintf(os.Stderr, "looptab active pid update failed: %v\n", err)
+		}
+	})
 	if liveOutput != nil {
 		_ = liveOutput.Close()
 	}

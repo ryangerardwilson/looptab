@@ -52,7 +52,8 @@ saturday|saturdays <time[,time...]>
 sunday|sundays <time[,time...]>
 ```
 
-`now` runs once each time `looptab run` loads the file. If you edit and save the file while the scheduler is running, `now` jobs in the new file run once after that reload.
+`now` runs once when the background scheduler first sees that exact job. If you edit and save the file while the scheduler is running, changed `now` jobs run once after that reload.
+The background scheduler records claimed `now` job IDs in `~/.local/state/looptab/now-runs.json`, so restarting the service does not rerun unchanged `now` jobs. Use `looptab run now` to force a manual run.
 
 Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
 `hourly` runs at minute `0` each hour. Use `hourly at 15` to run at minute `15` each hour.
@@ -95,8 +96,11 @@ looptab inspect <job-or-run-id>
 looptab stream
   stream live Codex output across all active loops
 
+looptab kill <index>
+  kill one active Codex loop by the index shown in `looptab status`
+
 looptab status
-  show currently running Codex loops
+  show currently running Codex loops with kill indexes
 
 looptab status json
   print active loop state for bars and scripts
@@ -107,6 +111,7 @@ looptab status watch
 looptab service install
 looptab service start
 looptab service stop
+looptab service restart
 looptab service status
 looptab service remove
   manage the Linux systemd user service
@@ -150,6 +155,15 @@ looptab stream
 
 `looptab stream` waits when no loops are active. When a loop starts, it prints the latest live output for that run, prefixes streamed lines with the job ID, and keeps following all active loops until you press `Ctrl-C`.
 
+To stop one active loop:
+
+```sh
+looptab status
+looptab kill 0
+```
+
+The kill argument is the active index from `looptab status`, not the stable parsed job hash.
+
 `looptab status json` prints live active-run state for desktop bars and scripts.
 `looptab status watch` streams the same shape as compact JSON lines:
 
@@ -160,6 +174,7 @@ looptab stream
   "jobs": [
     {
       "job_id": "a1b2c3d4",
+      "index": 0,
       "schedule": "daily 11am",
       "cwd_display": "~/Work/example",
       "prompt": "Review the repo.",
@@ -179,6 +194,7 @@ You can still manage the service directly:
 ```sh
 looptab service install
 looptab service start
+looptab service restart
 looptab service status
 ```
 

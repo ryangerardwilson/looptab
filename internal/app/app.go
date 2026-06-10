@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +59,8 @@ func Run(args []string, version string) error {
 		return inspectCommand(p, args[1:])
 	case "stream":
 		return streamCommand(p, args[1:])
+	case "kill":
+		return killCommand(p, args[1:])
 	case "status":
 		return statusCommand(p, args[1:])
 	case "service":
@@ -160,7 +163,11 @@ func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
 		}
 	}
 
-	result := runner.RunWithOutput(context.Background(), job, handle.StartedAt(), liveWriter)
+	result := runner.RunWithOutputAndPID(context.Background(), job, handle.StartedAt(), liveWriter, func(pid int) {
+		if err := handle.SetPID(pid); err != nil {
+			fmt.Fprintf(os.Stderr, "looptab active pid update failed: %v\n", err)
+		}
+	})
 	if liveOutput != nil {
 		_ = liveOutput.Close()
 	}
@@ -303,6 +310,49 @@ func streamCommand(p paths.Paths, args []string) error {
 	defer stop()
 
 	return streamActiveRuns(ctx, active.NewStore(p), os.Stdout, 250*time.Millisecond)
+}
+
+func killCommand(p paths.Paths, args []string) error {
+	if len(args) != 1 {
+		return errors.New("expected `looptab kill <index>`")
+	}
+	index, err := strconv.Atoi(args[0])
+	if err != nil || index < 0 {
+		return fmt.Errorf("expected active job index, got %q", args[0])
+	}
+
+	store := active.NewStore(p)
+	summary, err := store.Summary()
+	if err != nil {
+		return err
+	}
+	if summary.Count == 0 {
+		fmt.Fprintln(os.Stdout, "No looptab Codex runs are active.")
+		return nil
+	}
+	if index >= len(summary.Jobs) {
+		return fmt.Errorf("active job index %d is not running; use `looptab status`", index)
+	}
+
+	job := summary.Jobs[index]
+	if len(job.KillPIDs) == 0 {
+		if job.LegacyNoLive {
+			if err := store.Remove(job.RunID); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stdout, "Removed stale active job %d (%s); no Codex process was running.\n", job.Index, job.JobID)
+			return nil
+		}
+		return fmt.Errorf("active job %d (%s) has no killable Codex process yet", job.Index, job.JobID)
+	}
+
+	for _, pid := range job.KillPIDs {
+		if err := terminateProcess(pid, 2*time.Second); err != nil {
+			return fmt.Errorf("kill job %d (%s), pid %d: %w", job.Index, job.JobID, pid, err)
+		}
+	}
+	fmt.Fprintf(os.Stdout, "Killed active job %d (%s).\n", job.Index, job.JobID)
+	return nil
 }
 
 func selectActiveJob(jobs []active.Job, id string) (active.Job, bool, error) {
@@ -456,7 +506,12 @@ func streamActiveRuns(ctx context.Context, store active.Store, w io.Writer, inte
 func openRunStream(job active.Job, w io.Writer) (*runStream, error) {
 	fmt.Fprintf(w, "\n[%s] started from %s: %s\n", job.JobID, job.CWDDisplay, job.Prompt)
 	if job.OutputPath == "" {
-		fmt.Fprintf(w, "[%s] live output is not available for this run\n", job.JobID)
+		if job.LegacyNoLive {
+			fmt.Fprintf(w, "[%s] live output is not available because this run was started by an older scheduler that did not create live logs\n", job.JobID)
+			fmt.Fprintf(w, "[%s] after active jobs finish, run `looptab service restart` to load the upgraded scheduler\n", job.JobID)
+		} else {
+			fmt.Fprintf(w, "[%s] live output is not available for this run\n", job.JobID)
+		}
 		return &runStream{job: job, atLineStart: true}, nil
 	}
 
@@ -599,6 +654,52 @@ func writeLabeledOutput(w io.Writer, label string, content []byte, atLineStart b
 	return atLineStart, nil
 }
 
+func terminateProcess(pid int, grace time.Duration) error {
+	if pid <= 0 {
+		return errors.New("invalid pid")
+	}
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return err
+			}
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
 func followActiveOutput(p paths.Paths, job active.Job, w io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -671,7 +772,7 @@ func formatMillis(ms int64) string {
 
 func serviceCommand(args []string) error {
 	if len(args) != 1 {
-		return errors.New("expected `looptab service install|start|stop|status|remove`")
+		return errors.New("expected `looptab service install|start|stop|restart|status|remove`")
 	}
 
 	manager, err := service.NewUserManager()
@@ -686,12 +787,14 @@ func serviceCommand(args []string) error {
 		return manager.Start()
 	case "stop":
 		return manager.Stop()
+	case "restart":
+		return manager.Restart()
 	case "status":
 		return manager.Status()
 	case "remove":
 		return manager.Remove()
 	default:
-		return errors.New("expected `looptab service install|start|stop|status|remove`")
+		return errors.New("expected `looptab service install|start|stop|restart|status|remove`")
 	}
 }
 
@@ -884,6 +987,11 @@ features:
   # stream
   looptab stream
 
+  kill an active loop by status index
+  # kill <index>
+  looptab status
+  looptab kill 0
+
   inspect active Codex loops
   # status | status json | status watch
   looptab status
@@ -891,9 +999,10 @@ features:
   looptab status watch
 
   install and manage the background scheduler
-  # service install|start|stop|status|remove
+  # service install|start|stop|restart|status|remove
   looptab service install
   looptab service start
+  looptab service restart
   looptab service status
 `
 

@@ -129,6 +129,10 @@ func (m UserManager) Stop() error {
 	return systemctl("stop", serviceName)
 }
 
+func (m UserManager) Restart() error {
+	return systemctl("restart", serviceName)
+}
+
 func (m UserManager) Status() error {
 	return systemctl("status", serviceName, "--no-pager")
 }
