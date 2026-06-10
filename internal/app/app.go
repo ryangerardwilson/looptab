@@ -53,8 +53,6 @@ func Run(args []string, version string) error {
 		return runCheck(p, os.Stdout)
 	case "run":
 		return runCommand(p, args[1:])
-	case "logs":
-		return logsCommand(p, args[1:])
 	case "inspect":
 		return inspectCommand(p, args[1:])
 	case "stream":
@@ -234,32 +232,6 @@ func printStatusJSONLine(store active.Store, w io.Writer) error {
 	return err
 }
 
-func logsCommand(p paths.Paths, args []string) error {
-	location := time.UTC
-	if file, err := loadFile(p); err == nil {
-		location = file.Location
-	}
-	store := runlog.NewStore(p).WithLocation(location)
-	if len(args) == 0 {
-		return openLogsReport(p, store)
-	}
-	if len(args) == 1 && args[0] == "print" {
-		return store.PrintSummary(os.Stdout)
-	}
-	if len(args) == 2 && args[0] == "job" {
-		return store.PrintJob(os.Stdout, args[1])
-	}
-	return errors.New("expected `looptab logs`, `looptab logs print`, or `looptab logs job <id>`")
-}
-
-func openLogsReport(p paths.Paths, store runlog.Store) error {
-	path := filepath.Join(p.StateDir, "looptab.md")
-	if err := store.WriteMarkdownReportFile(path); err != nil {
-		return err
-	}
-	return editor.Open(path)
-}
-
 func inspectCommand(p paths.Paths, args []string) error {
 	if len(args) > 1 {
 		return errors.New("expected `looptab inspect` or `looptab inspect <job-or-run-id>`")
@@ -287,7 +259,7 @@ func inspectCommand(p paths.Paths, args []string) error {
 	if id == "" {
 		if summary.Count == 0 {
 			fmt.Fprintln(os.Stdout, "No looptab Codex runs are active.")
-			fmt.Fprintln(os.Stdout, "Use `looptab logs` to inspect completed runs.")
+			fmt.Fprintln(os.Stdout, "Use `looptab inspect <job-or-run-id>` to inspect a completed run.")
 			return nil
 		}
 		if err := activeStore.Print(os.Stdout); err != nil {
@@ -572,7 +544,7 @@ func openRunStream(job active.Job, w io.Writer) (*runStream, error) {
 	fmt.Fprintf(w, "\n[%s] started from %s: %s\n", job.JobID, job.CWDDisplay, job.Prompt)
 	if job.OutputPath == "" {
 		if job.LegacyNoLive {
-			fmt.Fprintf(w, "[%s] live output is not available because this run was started by an older scheduler that did not create live logs\n", job.JobID)
+			fmt.Fprintf(w, "[%s] live output is not available because this run was started by an older scheduler that did not create live output files\n", job.JobID)
 			fmt.Fprintf(w, "[%s] after active jobs finish, run `looptab service restart` to load the upgraded scheduler\n", job.JobID)
 		} else {
 			fmt.Fprintf(w, "[%s] live output is not available for this run\n", job.JobID)
@@ -1036,12 +1008,6 @@ features:
   looptab run
   looptab run now
   looptab run job a1b2c3d4
-
-  inspect what ran, when it ran, and what Codex reported
-  # logs | logs print | logs job <id>
-  looptab logs        open the detailed Markdown report
-  looptab logs print  print the compact table
-  looptab logs job a1b2c3d4
 
   inspect live or completed Codex output
   # inspect | inspect <job-or-run-id>

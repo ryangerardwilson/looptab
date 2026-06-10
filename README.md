@@ -78,15 +78,6 @@ looptab run now
 looptab run job <id>
   run one parsed job immediately
 
-looptab logs
-  open the detailed Markdown run report in your editor
-
-looptab logs print
-  print the compact run history table to stdout
-
-looptab logs job <id>
-  show one job's run history and latest output tail
-
 looptab inspect
   follow the only active Codex run's live output
 
@@ -120,9 +111,9 @@ looptab service remove
   manage the Linux systemd user service
 ```
 
-## Logs
+## Internal Run State
 
-Looptab records every run in:
+Looptab keeps internal run state in:
 
 ```text
 ~/.local/state/looptab/runs.jsonl
@@ -130,18 +121,7 @@ Looptab records every run in:
 ~/.local/state/looptab/active/
 ```
 
-`looptab logs` writes a detailed Markdown report to `~/.local/state/looptab/looptab.md` and opens it in your editor. The report is heading-driven, with one section per run containing metadata, full prompt, untruncated report, error details, output log path, and captured Codex output.
-
-`looptab logs print` prints the compact table:
-
-```text
-Looptab runs
-when                     status  duration  job       cwd                 report
-2026-06-10 10:00:00 IST  ok      1m12s     a1b2c3d4  ~/Work/example      Updated README and ran tests.
-2026-06-10 11:00:00 IST  failed  8s        a1b2c3d4  ~/Work/example      codex exited with status 1
-```
-
-The JSONL history is the audit trail. The per-run `.log` files contain full Codex output. While a run is active, Codex output is written to that run's log file as it arrives.
+The JSONL history is the audit trail for Looptab itself. The per-run output files contain full Codex output and are used by `looptab inspect`, `looptab stream`, status integrations, and completed-run lookup. While a run is active, Codex output is written to that run's output file as it arrives.
 
 To inspect a running job:
 
