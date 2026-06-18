@@ -34,7 +34,10 @@ type Record struct {
 	Schedule   string    `json:"schedule"`
 	Timezone   string    `json:"timezone,omitempty"`
 	CWD        string    `json:"cwd"`
-	Prompt     string    `json:"prompt"`
+	Kind           string   `json:"kind,omitempty"`
+	Prompt         string   `json:"prompt,omitempty"`
+	Command        []string `json:"command,omitempty"`
+	ActionDisplay  string   `json:"action_display"`
 	StartedAt  time.Time `json:"started_at"`
 	OutputPath string    `json:"output_path,omitempty"`
 	OwnerPID   int       `json:"owner_pid,omitempty"`
@@ -50,7 +53,10 @@ type Job struct {
 	Timezone       string    `json:"timezone,omitempty"`
 	CWD            string    `json:"cwd"`
 	CWDDisplay     string    `json:"cwd_display"`
-	Prompt         string    `json:"prompt"`
+	Kind           string    `json:"kind,omitempty"`
+	Prompt         string    `json:"prompt,omitempty"`
+	Command        []string  `json:"command,omitempty"`
+	ActionDisplay  string    `json:"action_display"`
 	StartedAt      time.Time `json:"started_at"`
 	DurationMillis int64     `json:"duration_millis"`
 	OutputPath     string    `json:"output_path,omitempty"`
@@ -91,16 +97,19 @@ func (s Store) Begin(job parser.Job) (*Handle, error) {
 	}
 
 	record := Record{
-		RunID:      runID,
-		JobID:      job.ID,
-		Line:       job.Line,
-		Schedule:   job.Schedule,
-		Timezone:   job.Timezone,
-		CWD:        job.CWD,
-		Prompt:     job.Prompt,
-		StartedAt:  started,
-		OutputPath: outputPath,
-		OwnerPID:   os.Getpid(),
+		RunID:         runID,
+		JobID:         job.ID,
+		Line:          job.Line,
+		Schedule:      job.Schedule,
+		Timezone:      job.Timezone,
+		CWD:           job.CWD,
+		Kind:          string(job.Kind),
+		Prompt:        job.Prompt,
+		Command:       job.Command,
+		ActionDisplay: job.ActionDisplay(),
+		StartedAt:     started,
+		OutputPath:    outputPath,
+		OwnerPID:      os.Getpid(),
 	}
 
 	path := filepath.Join(s.paths.ActiveDir, record.RunID+".json")
@@ -217,7 +226,10 @@ func (s Store) Summary() (Summary, error) {
 			Timezone:       record.Timezone,
 			CWD:            record.CWD,
 			CWDDisplay:     paths.DisplayPath(record.CWD),
+			Kind:           record.Kind,
 			Prompt:         record.Prompt,
+			Command:        record.Command,
+			ActionDisplay:  actionDisplayForRecord(record),
 			StartedAt:      record.StartedAt,
 			DurationMillis: now.Sub(record.StartedAt).Milliseconds(),
 			OutputPath:     record.OutputPath,
@@ -247,23 +259,24 @@ func (s Store) Print(w io.Writer) error {
 		return err
 	}
 	if !summary.Running {
-		fmt.Fprintln(w, "No looptab Codex runs are active.")
+		fmt.Fprintln(w, "No looptab runs are active.")
 		return nil
 	}
 
 	fmt.Fprintln(w, "Active looptab runs")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "index\tduration\tjob\tcwd\tschedule\tprompt")
+	fmt.Fprintln(tw, "index\tduration\tjob\tkind\tcwd\tschedule\taction")
 	for _, job := range summary.Jobs {
 		fmt.Fprintf(
 			tw,
-			"%d\t%s\t%s\t%s\t%s\t%s\n",
+			"%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			job.Index,
 			formatDuration(job.DurationMillis),
 			job.JobID,
+			job.Kind,
 			truncate(job.CWDDisplay, 28),
 			truncate(job.Schedule, 22),
-			truncate(job.Prompt, 62),
+			truncate(job.ActionDisplay, 62),
 		)
 	}
 	return tw.Flush()
@@ -438,6 +451,16 @@ func formatDuration(ms int64) string {
 		return duration.String()
 	}
 	return duration.Round(time.Second).String()
+}
+
+func actionDisplayForRecord(record Record) string {
+	if record.ActionDisplay != "" {
+		return record.ActionDisplay
+	}
+	if len(record.Command) > 0 {
+		return strings.Join(record.Command, " ")
+	}
+	return record.Prompt
 }
 
 func truncate(input string, limit int) string {

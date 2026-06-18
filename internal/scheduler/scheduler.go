@@ -10,7 +10,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"github.com/ryangerardwilson/looptab/internal/active"
-	"github.com/ryangerardwilson/looptab/internal/codex"
+	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/oncejob"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
@@ -36,7 +36,7 @@ func New(p paths.Paths) *Scheduler {
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
-	runner, err := codex.NewRunner()
+	runner, err := runner.NewRunner()
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (s *Scheduler) loadFile() (parser.File, time.Time, error) {
 	return file, stat.ModTime(), err
 }
 
-func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt time.Time, runner codex.Runner, store runlog.Store) (*cron.Cron, error) {
+func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt time.Time, jobRunner runner.Runner, store runlog.Store) (*cron.Cron, error) {
 	parserSpec := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(
 		cron.WithParser(parserSpec),
@@ -140,12 +140,12 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt ti
 			if alreadyAttempted {
 				continue
 			}
-			go s.runJob(ctx, localJob, runner, store)
+			go s.runJob(ctx, localJob, jobRunner, store)
 			continue
 		}
 		for _, spec := range localJob.CronSpecs {
 			if _, err := c.AddFunc(spec, func() {
-				s.runJob(ctx, localJob, runner, store)
+				s.runJob(ctx, localJob, jobRunner, store)
 			}); err != nil {
 				return nil, err
 			}
@@ -169,7 +169,7 @@ func nowJobAlreadyAttemptedForLoad(store runlog.Store, job parser.Job, loadedAt 
 	return false, nil
 }
 
-func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Runner, store runlog.Store) {
+func (s *Scheduler) runJob(ctx context.Context, job parser.Job, jobRunner runner.Runner, store runlog.Store) {
 	if !s.tryStart(job.ID) {
 		record := runlog.SkippedRecord(job, "previous run still active")
 		if err := store.Save(record, ""); err != nil {
@@ -213,7 +213,7 @@ func (s *Scheduler) runJob(ctx context.Context, job parser.Job, runner codex.Run
 		}
 	}
 
-	result := runner.RunWithOutputAndPID(ctx, job, handle.StartedAt(), liveWriter, func(pid int) {
+	result := jobRunner.RunWithOutputAndPID(ctx, job, handle.StartedAt(), liveWriter, func(pid int) {
 		if err := handle.SetPID(pid); err != nil {
 			fmt.Fprintf(os.Stderr, "looptab active pid update failed: %v\n", err)
 		}

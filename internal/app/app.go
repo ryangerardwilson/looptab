@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/ryangerardwilson/looptab/internal/active"
-	"github.com/ryangerardwilson/looptab/internal/codex"
+	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/editor"
 	"github.com/ryangerardwilson/looptab/internal/lock"
 	"github.com/ryangerardwilson/looptab/internal/parser"
@@ -135,14 +135,14 @@ func runNowJobs(p paths.Paths) error {
 }
 
 func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
-	runner, err := codex.NewRunner()
+	jobRunner, err := runner.NewRunner()
 	if err != nil {
 		return err
 	}
 
 	store := runlog.NewStore(p).WithLocation(file.Location)
 	activeStore := active.NewStore(p)
-	fmt.Fprintf(os.Stdout, "running job %s from %s\n", job.ID, paths.DisplayPath(job.CWD))
+	fmt.Fprintf(os.Stdout, "running job %s (%s) from %s\n", job.ID, job.Kind, paths.DisplayPath(job.CWD))
 	handle, err := activeStore.Begin(job)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "looptab active status failed: %v\n", err)
@@ -161,7 +161,7 @@ func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
 		}
 	}
 
-	result := runner.RunWithOutputAndPID(context.Background(), job, handle.StartedAt(), liveWriter, func(pid int) {
+	result := jobRunner.RunWithOutputAndPID(context.Background(), job, handle.StartedAt(), liveWriter, func(pid int) {
 		if err := handle.SetPID(pid); err != nil {
 			fmt.Fprintf(os.Stderr, "looptab active pid update failed: %v\n", err)
 		}
@@ -258,7 +258,7 @@ func inspectCommand(p paths.Paths, args []string) error {
 
 	if id == "" {
 		if summary.Count == 0 {
-			fmt.Fprintln(os.Stdout, "No looptab Codex runs are active.")
+			fmt.Fprintln(os.Stdout, "No looptab runs are active.")
 			fmt.Fprintln(os.Stdout, "Use `looptab inspect <job-or-run-id>` to inspect a completed run.")
 			return nil
 		}
@@ -308,7 +308,7 @@ func killCommand(p paths.Paths, args []string) error {
 		return err
 	}
 	if summary.Count == 0 {
-		fmt.Fprintln(os.Stdout, "No looptab Codex runs are active.")
+		fmt.Fprintln(os.Stdout, "No looptab runs are active.")
 		return nil
 	}
 	if index >= len(summary.Jobs) {
@@ -321,10 +321,10 @@ func killCommand(p paths.Paths, args []string) error {
 			if err := store.Remove(job.RunID); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stdout, "Removed stale active job %d (%s); no Codex process was running.\n", job.Index, job.JobID)
+			fmt.Fprintf(os.Stdout, "Removed stale active job %d (%s); no process was running.\n", job.Index, job.JobID)
 			return nil
 		}
-		return fmt.Errorf("active job %d (%s) has no killable Codex process yet", job.Index, job.JobID)
+		return fmt.Errorf("active job %d (%s) has no killable process yet", job.Index, job.JobID)
 	}
 
 	for _, pid := range job.KillPIDs {
@@ -364,7 +364,8 @@ func inspectActiveRun(p paths.Paths, job active.Job, w io.Writer) error {
 	fmt.Fprintf(w, "job: %s\n", job.JobID)
 	fmt.Fprintf(w, "duration: %s\n", formatMillis(job.DurationMillis))
 	fmt.Fprintf(w, "cwd: %s\n", job.CWDDisplay)
-	fmt.Fprintf(w, "prompt: %s\n", job.Prompt)
+	fmt.Fprintf(w, "kind: %s\n", job.Kind)
+	fmt.Fprintf(w, "action: %s\n", job.ActionDisplay)
 	if job.OutputPath == "" {
 		fmt.Fprintln(w, "\nlive output is not available for this run.")
 		fmt.Fprintln(w, "This run started before live inspection was installed.")
@@ -406,7 +407,10 @@ func inspectCompletedRun(p paths.Paths, id string, w io.Writer) error {
 	fmt.Fprintf(w, "status: %s\n", latest.Status)
 	fmt.Fprintf(w, "duration: %s\n", formatMillis(latest.DurationMillis))
 	fmt.Fprintf(w, "cwd: %s\n", paths.DisplayPath(latest.CWD))
-	fmt.Fprintf(w, "prompt: %s\n", latest.Prompt)
+	if latest.Kind != "" {
+		fmt.Fprintf(w, "kind: %s\n", latest.Kind)
+	}
+	fmt.Fprintf(w, "action: %s\n", actionDisplayForRecord(latest))
 	if latest.OutputPath == "" {
 		return errors.New("this run has no output log")
 	}
@@ -438,7 +442,7 @@ func streamActiveRuns(ctx context.Context, store active.Store, w io.Writer, inte
 
 		activeRuns := make(map[string]bool)
 		if summary.Count == 0 && len(streams) == 0 && !waitingPrinted {
-			fmt.Fprintln(w, "No looptab Codex runs are active; waiting for live output. Press Ctrl-C to stop.")
+			fmt.Fprintln(w, "No looptab runs are active; waiting for live output. Press Ctrl-C to stop.")
 			waitingPrinted = true
 		}
 
@@ -541,7 +545,7 @@ func summaryHasRun(summary active.Summary, runID string) bool {
 }
 
 func openRunStream(job active.Job, w io.Writer) (*runStream, error) {
-	fmt.Fprintf(w, "\n[%s] started from %s: %s\n", job.JobID, job.CWDDisplay, job.Prompt)
+	fmt.Fprintf(w, "\n[%s] started from %s: %s\n", job.JobID, job.CWDDisplay, job.ActionDisplay)
 	if job.OutputPath == "" {
 		if job.LegacyNoLive {
 			fmt.Fprintf(w, "[%s] live output is not available because this run was started by an older scheduler that did not create live output files\n", job.JobID)
@@ -849,12 +853,14 @@ func runCheck(p paths.Paths, w io.Writer) error {
 		return err
 	}
 
-	codexPath, err := codex.FindBinary()
+	jobRunner, err := runner.NewRunner()
 	if err != nil {
 		return err
 	}
 
 	var invalid []string
+	needsCodex := false
+	needsGrok := false
 	for _, job := range file.Jobs {
 		info, err := os.Stat(job.CWD)
 		if err != nil {
@@ -864,21 +870,67 @@ func runCheck(p paths.Paths, w io.Writer) error {
 		if !info.IsDir() {
 			invalid = append(invalid, fmt.Sprintf("line %d: cwd is not a directory: %s", job.Line, job.CWD))
 		}
+		switch job.Kind {
+		case parser.JobKindGrok:
+			needsGrok = true
+		case parser.JobKindCommand:
+			if len(job.Command) == 0 {
+				invalid = append(invalid, fmt.Sprintf("line %d: command job is missing an executable", job.Line))
+				continue
+			}
+			executable := job.Command[0]
+			if strings.HasPrefix(executable, "~/") {
+				home, homeErr := os.UserHomeDir()
+				if homeErr != nil {
+					invalid = append(invalid, fmt.Sprintf("line %d: %v", job.Line, homeErr))
+					continue
+				}
+				executable = filepath.Join(home, strings.TrimPrefix(executable, "~/"))
+			}
+			info, err := os.Stat(executable)
+			if err != nil {
+				invalid = append(invalid, fmt.Sprintf("line %d: executable does not exist: %s", job.Line, job.Command[0]))
+				continue
+			}
+			if info.IsDir() {
+				invalid = append(invalid, fmt.Sprintf("line %d: executable is a directory: %s", job.Line, job.Command[0]))
+			}
+		default:
+			needsCodex = true
+		}
 	}
 	if len(invalid) > 0 {
 		return errors.New(strings.Join(invalid, "\n"))
+	}
+
+	if needsCodex {
+		jobRunner.CodexBin, err = runner.FindCodexBinary()
+		if err != nil {
+			return err
+		}
+	}
+	if needsGrok {
+		jobRunner.GrokBin, err = runner.FindGrokBinary()
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Fprintf(w, "looptab check passed\n")
 	fmt.Fprintf(w, "file: %s\n", p.ConfigFile)
 	fmt.Fprintf(w, "timezone: %s\n", file.Timezone)
 	fmt.Fprintf(w, "jobs: %d\n", len(file.Jobs))
-	fmt.Fprintf(w, "codex: %s\n", codexPath)
+	if needsCodex {
+		fmt.Fprintf(w, "codex: %s\n", jobRunner.CodexBin)
+	}
+	if needsGrok {
+		fmt.Fprintf(w, "grok: %s\n", jobRunner.GrokBin)
+	}
 	if len(file.Jobs) > 0 {
 		fmt.Fprintln(w, "")
 		fmt.Fprintln(w, "parsed jobs:")
 		for _, job := range file.Jobs {
-			fmt.Fprintf(w, "  %s  line %d  %s  %s  %q\n", job.ID, job.Line, job.Schedule, paths.DisplayPath(job.CWD), job.Prompt)
+			fmt.Fprintf(w, "  %s  line %d  %s  %s  %s  %s\n", job.ID, job.Line, job.Kind, job.Schedule, paths.DisplayPath(job.CWD), job.ActionDisplay())
 		}
 	}
 	printNowNoticeForFile(p, file, w)
@@ -971,10 +1023,20 @@ func schedulerActive(p paths.Paths) bool {
 	return err == nil
 }
 
+func actionDisplayForRecord(record runlog.Record) string {
+	if len(record.Command) > 0 {
+		return strings.Join(record.Command, " ")
+	}
+	if record.Kind == string(parser.JobKindGrok) && record.Prompt != "" {
+		return "@grok " + strconv.Quote(record.Prompt)
+	}
+	return record.Prompt
+}
+
 func printHelp(w io.Writer) {
 	text := `Looptab
 
-Edit and run Codex loops from ~/.config/looptab/looptab.
+Edit and run scheduled AI loops and commands from ~/.config/looptab/looptab.
 
 global actions:
   looptab
@@ -989,17 +1051,15 @@ features:
   # timezone <IANA name>
   timezone UTC
 
-  # <when> [cwd] "<prompt>"
-  now "Run once from home when looptab loads."
-  hourly "Review from home once per hour."
+  # <when> [cwd] "<prompt>" | @grok "<prompt>" | <executable> [args...]
+  now "Run once with Codex from home when looptab loads."
+  daily 5am @grok "Check my emails and prepare me a brief."
+  daily 11am @codex ~/Work/example "Review the repo and fix one small obvious issue."
+  daily 5am ~/.local/bin/gmail sync
   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
-  daily 11am "Review from home and fix one small obvious issue."
-  daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
-  daily 11am,12pm,1pm ~/Work/example "Run a quick maintenance pass."
   weekdays 9am ~/Work/example "Plan the day and update TODOs."
-  mondays 5am ~/Work/example "Prepare the weekly review."
 
-  validate the file and local Codex command
+  validate the file, working directories, and required executables
   # check
   looptab check
 
@@ -1009,12 +1069,12 @@ features:
   looptab run now
   looptab run job a1b2c3d4
 
-  inspect live or completed Codex output
+  inspect live or completed job output
   # inspect | inspect <job-or-run-id>
   looptab inspect
   looptab inspect a1b2c3d4
 
-  stream live Codex output across all active loops or one active index
+  stream live job output across all active loops or one active index
   # stream [index]
   looptab stream
   looptab stream 0
@@ -1024,7 +1084,7 @@ features:
   looptab status
   looptab kill 0
 
-  inspect active Codex loops
+  inspect active loops
   # status | status json | status watch
   looptab status
   looptab status json

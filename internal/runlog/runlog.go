@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ryangerardwilson/looptab/internal/codex"
 	"github.com/ryangerardwilson/looptab/internal/parser"
+	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/paths"
 )
 
@@ -30,7 +30,9 @@ type Record struct {
 	Schedule       string    `json:"schedule"`
 	Timezone       string    `json:"timezone,omitempty"`
 	CWD            string    `json:"cwd"`
-	Prompt         string    `json:"prompt"`
+	Kind           string    `json:"kind,omitempty"`
+	Prompt         string    `json:"prompt,omitempty"`
+	Command        []string  `json:"command,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 	FinishedAt     time.Time `json:"finished_at"`
 	DurationMillis int64     `json:"duration_millis"`
@@ -52,7 +54,7 @@ func (s Store) WithLocation(location *time.Location) Store {
 	return s
 }
 
-func RecordFromResult(job parser.Job, result codex.Result) (Record, error) {
+func RecordFromResult(job parser.Job, result runner.Result) (Record, error) {
 	status := "ok"
 	errorText := ""
 	if result.Err != nil {
@@ -70,8 +72,10 @@ func RecordFromResult(job parser.Job, result codex.Result) (Record, error) {
 		Line:           job.Line,
 		Schedule:       job.Schedule,
 		Timezone:       job.Timezone,
+		Kind:           string(job.Kind),
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
+		Command:        job.Command,
 		StartedAt:      result.StartedAt,
 		FinishedAt:     result.FinishedAt,
 		DurationMillis: result.FinishedAt.Sub(result.StartedAt).Milliseconds(),
@@ -91,8 +95,10 @@ func SkippedRecord(job parser.Job, reason string) Record {
 		Line:           job.Line,
 		Schedule:       job.Schedule,
 		Timezone:       job.Timezone,
+		Kind:           string(job.Kind),
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
+		Command:        job.Command,
 		StartedAt:      now,
 		FinishedAt:     now,
 		DurationMillis: 0,
@@ -111,8 +117,10 @@ func FailedRecord(job parser.Job, reason string) Record {
 		Line:           job.Line,
 		Schedule:       job.Schedule,
 		Timezone:       job.Timezone,
+		Kind:           string(job.Kind),
 		CWD:            job.CWD,
 		Prompt:         job.Prompt,
+		Command:        job.Command,
 		StartedAt:      now,
 		FinishedAt:     now,
 		DurationMillis: 0,

@@ -1,4 +1,4 @@
-package codex
+package runner
 
 import (
 	"bytes"
@@ -38,11 +38,12 @@ printf 'Codex work summary.\n'
 		Line:     1,
 		Schedule: "daily 11am",
 		Timezone: "UTC",
+		Kind:     parser.JobKindCodex,
 		CWD:      workdir,
 		Prompt:   "Review the repo.",
 	}
 
-	result := Runner{Bin: fake}.Run(context.Background(), job)
+	result := Runner{CodexBin: fake}.Run(context.Background(), job)
 	if result.Err != nil {
 		t.Fatal(result.Err)
 	}
@@ -54,6 +55,89 @@ printf 'Codex work summary.\n'
 		"cwd=" + workdir,
 		"args=[exec][--color][never][--cd][" + workdir + "][Review the repo.]",
 		"Codex work summary.",
+	} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("output missing %q:\n%s", want, result.Output)
+		}
+	}
+}
+
+func TestRunnerInvokesGrokHeadless(t *testing.T) {
+	temp := t.TempDir()
+	workdir := filepath.Join(temp, "work")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := filepath.Join(temp, "grok")
+	script := `#!/usr/bin/env sh
+printf 'cwd=%s\n' "$PWD"
+printf 'args='
+for arg do
+  printf '[%s]' "$arg"
+done
+printf '\n'
+`
+	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	job := parser.Job{
+		ID:       "abcd1234",
+		Line:     1,
+		Schedule: "daily 5am",
+		Timezone: "UTC",
+		Kind:     parser.JobKindGrok,
+		CWD:      workdir,
+		Prompt:   "Prepare a brief.",
+	}
+
+	result := Runner{GrokBin: fake}.Run(context.Background(), job)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if !strings.Contains(result.Output, "args=[--always-approve][--cwd]["+workdir+"][-p][Prepare a brief.]") {
+		t.Fatalf("unexpected output:\n%s", result.Output)
+	}
+}
+
+func TestRunnerInvokesDirectCommand(t *testing.T) {
+	temp := t.TempDir()
+	workdir := filepath.Join(temp, "work")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := filepath.Join(temp, "task")
+	script := `#!/usr/bin/env sh
+printf 'cwd=%s\n' "$PWD"
+printf 'args='
+for arg do
+  printf '[%s]' "$arg"
+done
+printf '\n'
+`
+	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	job := parser.Job{
+		ID:       "abcd1234",
+		Line:     1,
+		Schedule: "daily 5am",
+		Timezone: "UTC",
+		Kind:     parser.JobKindCommand,
+		CWD:      workdir,
+		Command:  []string{fake, "sync", "--all"},
+	}
+
+	result := Runner{}.Run(context.Background(), job)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	for _, want := range []string{
+		"cwd=" + workdir,
+		"args=[sync][--all]",
 	} {
 		if !strings.Contains(result.Output, want) {
 			t.Fatalf("output missing %q:\n%s", want, result.Output)
@@ -82,13 +166,14 @@ printf 'second line\n' >&2
 		Line:     1,
 		Schedule: "now",
 		Timezone: "UTC",
+		Kind:     parser.JobKindCodex,
 		CWD:      workdir,
 		Prompt:   "Run live.",
 	}
 
 	var live bytes.Buffer
 	started := time.Date(2026, 6, 10, 1, 2, 3, 0, time.UTC)
-	result := Runner{Bin: fake}.RunWithOutput(context.Background(), job, started, &live)
+	result := Runner{CodexBin: fake}.RunWithOutput(context.Background(), job, started, &live)
 	if result.Err != nil {
 		t.Fatal(result.Err)
 	}

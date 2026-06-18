@@ -141,11 +141,11 @@ func TestParseFileRejectsOldCronSyntax(t *testing.T) {
 }
 
 func TestParseFileRejectsUnquotedPrompt(t *testing.T) {
-	_, err := Parse(`daily 11am ~/Work/example Review the repo.`)
+	_, err := Parse(`daily 11am Review the repo.`)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	if !strings.Contains(err.Error(), "prompt must be quoted") {
+	if !strings.Contains(err.Error(), "expected quoted prompt") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -189,6 +189,66 @@ timezone Asia/Kolkata
 		t.Fatal("expected parse error")
 	}
 	if !strings.Contains(err.Error(), "timezone must appear before jobs") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseFileSupportsGrokAndCommandJobs(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := Parse(`
+daily 5am @grok "Check my emails and prepare me a brief."
+daily 11am ~/Work/example @codex "Review the repo."
+daily 5am ~/.local/bin/gmail sync --all
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Jobs) != 3 {
+		t.Fatalf("expected 3 jobs, got %d", len(file.Jobs))
+	}
+	if file.Jobs[0].Kind != JobKindGrok {
+		t.Fatalf("expected grok job, got %s", file.Jobs[0].Kind)
+	}
+	if file.Jobs[0].Prompt != "Check my emails and prepare me a brief." {
+		t.Fatalf("unexpected grok prompt: %q", file.Jobs[0].Prompt)
+	}
+	if file.Jobs[1].Kind != JobKindCodex {
+		t.Fatalf("expected codex job, got %s", file.Jobs[1].Kind)
+	}
+	if !strings.HasPrefix(file.Jobs[1].CWD, home) {
+		t.Fatalf("cwd was not expanded: %s", file.Jobs[1].CWD)
+	}
+	if file.Jobs[2].Kind != JobKindCommand {
+		t.Fatalf("expected command job, got %s", file.Jobs[2].Kind)
+	}
+	wantCommand := []string{"~/.local/bin/gmail", "sync", "--all"}
+	for i, want := range wantCommand {
+		if file.Jobs[2].Command[i] != want {
+			t.Fatalf("command arg %d: expected %q, got %q", i, want, file.Jobs[2].Command[i])
+		}
+	}
+}
+
+func TestParseFileDefaultsQuotedPromptToCodex(t *testing.T) {
+	file, err := Parse(`daily 11am "Run tests."`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Jobs[0].Kind != JobKindCodex {
+		t.Fatalf("expected codex default, got %s", file.Jobs[0].Kind)
+	}
+}
+
+func TestParseFileRejectsAgentWithoutPrompt(t *testing.T) {
+	_, err := Parse(`daily 11am @grok`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "@grok requires a quoted prompt") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

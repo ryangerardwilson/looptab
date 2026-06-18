@@ -1,8 +1,8 @@
 # Looptab
 
-Looptab is a readable schedule file for Codex loops.
+Looptab is the source of truth for scheduled AI loops and direct commands.
 
-Run `looptab` to edit `~/.config/looptab/looptab`, then let the scheduler invoke Codex from the working directories you name.
+Run `looptab` to edit `~/.config/looptab/looptab`, then let the scheduler invoke Codex, Grok, or a direct executable on the cadence you define.
 
 ## Install
 
@@ -11,28 +11,41 @@ go install github.com/ryangerardwilson/looptab/cmd/looptab@latest
 looptab help
 ```
 
-Looptab expects the Codex CLI to be available as `codex` on `PATH`. If Codex lives somewhere else, set `CODEX_BIN`.
+Looptab resolves executables lazily per job kind:
+
+- Codex: `codex` on `PATH`, or `CODEX_BIN`
+- Grok: `grok` on `PATH`, or `GROK_BIN`
+- Command jobs: the executable path you name in the looptab file
 
 ## File Format
 
 The first non-comment line may set the timezone. If it is omitted, Looptab uses `UTC`.
 
-Each active job line has one readable schedule, an optional working directory, and one quoted prompt. When the directory is omitted, Looptab runs Codex from `~`.
+Each active job line has one readable schedule, an optional working directory, and one action. When the directory is omitted, Looptab runs from `~`.
 
 ```text
 timezone UTC
 
-now "Run once from home when looptab loads."
-now ~/Work/example "Run once from this repo when looptab loads."
+now "Run once with Codex from home when looptab loads."
+daily 5am @grok "Check my emails and prepare me a brief."
+daily 11am @codex ~/Work/example "Review the repo and fix one small obvious issue."
+daily 5am ~/.local/bin/gmail sync
 hourly "Review from home once per hour."
 hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
-daily 11am "Review from home and fix one small obvious issue."
-daily 11am ~/Work/example "Review the repo and fix one small obvious issue."
-daily 11am,12pm,1pm /home/ryan/Apps/example "Run a quick maintenance pass."
 weekdays 9am ~/Work/example "Plan the day and update TODOs."
-weekends 5am ~/Work/example "Check quiet weekend maintenance."
 mondays 5am ~/Work/example "Prepare the weekly review."
 ```
+
+Action forms:
+
+```text
+"<prompt>"                 # Codex (default)
+@codex "<prompt>"          # Codex
+@grok "<prompt>"           # Grok headless single-turn
+<executable> [args...]     # direct command, no shell
+```
+
+For AI jobs, the working directory must appear before `@grok`, `@codex`, or the quoted prompt when you set one explicitly. For command jobs, a path is only treated as `cwd` when it is followed by `@grok`, `@codex`, or a quoted prompt.
 
 Supported schedules:
 
@@ -58,7 +71,7 @@ The background scheduler records claimed `now` jobs by job ID and file modificat
 Times may be written as `11am`, `9:30am`, `5pm`, `17:15`, or comma-separated lists such as `11am,12pm,1pm`.
 `hourly` runs at minute `0` each hour. Use `hourly at 15` to run at minute `15` each hour.
 
-When present, the working directory must be absolute or start with `~`. The prompt must be quoted.
+When present, the working directory must be absolute or start with `~`. AI prompts must be quoted.
 
 ## Commands
 
@@ -67,7 +80,7 @@ looptab
   open ~/.config/looptab/looptab, then start the background scheduler when jobs exist
 
 looptab check
-  validate the loop file, timezone, working directories, and Codex binary, then print parsed job IDs
+  validate the loop file, timezone, working directories, and required executables, then print parsed job IDs
 
 looptab run
   run the scheduler in the foreground
@@ -79,22 +92,22 @@ looptab run job <id>
   run one parsed job immediately
 
 looptab inspect
-  follow the only active Codex run's live output
+  follow the only active run's live output
 
 looptab inspect <job-or-run-id>
   follow active output or show the latest completed output for a job or run
 
 looptab stream
-  stream live Codex output across all active loops
+  stream live output across all active loops
 
 looptab stream <index>
-  stream live Codex output for one active loop by the index shown in `looptab status`
+  stream live output for one active loop by the index shown in `looptab status`
 
 looptab kill <index>
-  kill one active Codex loop by the index shown in `looptab status`
+  kill one active loop by the index shown in `looptab status`
 
 looptab status
-  show currently running Codex loops with kill indexes
+  show currently running loops with kill indexes
 
 looptab status json
   print active loop state for bars and scripts
@@ -121,56 +134,7 @@ Looptab keeps internal run state in:
 ~/.local/state/looptab/active/
 ```
 
-The JSONL history is the audit trail for Looptab itself. The per-run output files contain full Codex output and are used by `looptab inspect`, `looptab stream`, status integrations, and completed-run lookup. While a run is active, Codex output is written to that run's output file as it arrives.
-
-To inspect a running job:
-
-```sh
-looptab inspect
-looptab inspect a1b2c3d4
-```
-
-If exactly one job is active, `looptab inspect` follows that run's live output until it finishes or you press `Ctrl-C`. With an ID, Looptab first looks for an active job or run, then falls back to the latest completed run with that job ID.
-
-To watch all active jobs at once:
-
-```sh
-looptab stream
-looptab stream 0
-```
-
-`looptab stream` waits when no loops are active. When a loop starts, it prints the latest live output for that run, prefixes streamed lines with the job ID, and keeps following all active loops until you press `Ctrl-C`.
-`looptab stream 0` streams only active index `0` from `looptab status` and exits when that run finishes.
-
-To stop one active loop:
-
-```sh
-looptab status
-looptab kill 0
-```
-
-The kill argument is the active index from `looptab status`, not the stable parsed job hash.
-
-`looptab status json` prints live active-run state for desktop bars and scripts.
-`looptab status watch` streams the same shape as compact JSON lines:
-
-```json
-{
-  "running": true,
-  "count": 1,
-  "jobs": [
-    {
-      "job_id": "a1b2c3d4",
-      "index": 0,
-      "schedule": "daily 11am",
-      "cwd_display": "~/Work/example",
-      "prompt": "Review the repo.",
-      "duration_millis": 42000,
-      "output_path": "/home/user/.local/state/looptab/logs/20260610T043000.000000000Z-a1b2c3d4.log"
-    }
-  ]
-}
-```
+The JSONL history is the audit trail for Looptab itself. The per-run output files contain full job output and are used by `looptab inspect`, `looptab stream`, status integrations, and completed-run lookup. While a run is active, output is written to that run's output file as it arrives.
 
 ## Background Service
 
@@ -189,12 +153,18 @@ The service uses the installed `looptab` binary path and records runs under `~/.
 
 ## Safety
 
-Looptab does not run arbitrary shell commands. It invokes Codex directly as:
+Looptab does not run arbitrary shell pipelines. It invokes executables directly:
 
 ```text
 codex exec --color never --cd <cwd> <prompt>
+grok --always-approve --cwd <cwd> -p <prompt>
+<executable> [args...] with cwd set to the job directory
 ```
 
 Jobs for the same ID do not overlap. If the next scheduled time arrives while the previous run is still active, Looptab records a skipped run.
 
 Missed times are not replayed after sleep or downtime.
+
+## Periodic Job Policy
+
+Use Looptab for routine automation that should be visible in one file. Prefer adding or moving jobs into `~/.config/looptab/looptab` instead of creating new app-owned systemd timers for the same work. When a job moves to Looptab, disable the redundant timer so only one scheduler owns that cadence.
