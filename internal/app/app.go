@@ -48,6 +48,8 @@ func Run(args []string, version string) error {
 		return nil
 	case "check":
 		return runCheck(p, os.Stdout)
+	case "now":
+		return runInteractiveNow(p)
 	case "run":
 		return runCommand(p, args[1:])
 	case "inspect":
@@ -1129,6 +1131,8 @@ global actions:
     show this help
   looptab version
     print the installed version
+  looptab now
+    list registered jobs and run one immediately
 
 features:
   edit the source-of-truth loop file
@@ -1146,7 +1150,11 @@ features:
   # check
   looptab check
 
-  run the scheduler in the foreground or run one job now
+  pick a registered job and run it immediately
+  # now
+  looptab now
+
+  run the scheduler in the foreground or run scheduled now-jobs
   # run | run now | run job <id>
   looptab run
   looptab run now

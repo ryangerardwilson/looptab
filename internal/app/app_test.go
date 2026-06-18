@@ -35,6 +35,53 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
+func TestSelectJobByIndex(t *testing.T) {
+	jobs, err := parser.ParseFile(`daily 5am "One."`+"\n"+`hourly "Two."`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := selectJob(jobs, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Schedule != "hourly" {
+		t.Fatalf("expected hourly job, got %s", job.Schedule)
+	}
+}
+
+func TestSelectJobByIDPrefix(t *testing.T) {
+	jobs, err := parser.ParseFile(`daily 5am "One."`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := selectJob(jobs, jobs[0].ID[:4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ID != jobs[0].ID {
+		t.Fatalf("expected %s, got %s", jobs[0].ID, job.ID)
+	}
+}
+
+func TestSelectJobRejectsOutOfRangeIndex(t *testing.T) {
+	jobs, err := parser.ParseFile(`daily 5am "One."`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selectJob(jobs, "3"); err == nil {
+		t.Fatal("expected out of range error")
+	}
+}
+
+func TestTruncateJobAction(t *testing.T) {
+	got := truncateJobAction(strings.Repeat("a", 80), 20)
+	if len(got) != 20 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("unexpected truncation: %q", got)
+	}
+}
+
 func TestEditSnapshotDetectsUnchangedFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "looptab")
