@@ -64,19 +64,9 @@ func printRegisteredJobs(w io.Writer, jobs []parser.Job) {
 			job.Schedule,
 			job.Kind,
 			paths.DisplayPath(job.CWD),
-			truncateJobAction(job.ActionDisplay(), 72),
+			job.ActionDisplay(),
 		)
 	}
-}
-
-func truncateJobAction(action string, max int) string {
-	if max <= 0 || len(action) <= max {
-		return action
-	}
-	if max <= 3 {
-		return action[:max]
-	}
-	return action[:max-3] + "..."
 }
 
 func isSelectionCancel(selection string) bool {

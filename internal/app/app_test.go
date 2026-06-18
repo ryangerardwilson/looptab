@@ -75,13 +75,6 @@ func TestSelectJobRejectsOutOfRangeIndex(t *testing.T) {
 	}
 }
 
-func TestTruncateJobAction(t *testing.T) {
-	got := truncateJobAction(strings.Repeat("a", 80), 20)
-	if len(got) != 20 || !strings.HasSuffix(got, "...") {
-		t.Fatalf("unexpected truncation: %q", got)
-	}
-}
-
 func TestEditSnapshotDetectsUnchangedFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "looptab")
