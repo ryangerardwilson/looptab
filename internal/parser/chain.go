@@ -206,17 +206,11 @@ func parsePrimaryAction(segment string) (Step, error) {
 	}
 
 	if tokens[0].quoted {
-		if tokens[0].value == "" {
-			return Step{}, errors.New("prompt must not be empty")
-		}
-		if len(tokens) > 1 {
-			return Step{}, errors.New("unexpected text after prompt")
-		}
-		return Step{Kind: JobKindCodex, Prompt: tokens[0].value}, nil
+		return Step{}, errors.New("AI jobs require @codex or @grok before the prompt")
 	}
 
 	if !isCommandToken(tokens[0].value) {
-		return Step{}, errors.New("expected quoted prompt, @grok, @codex, or a command")
+		return Step{}, errors.New("expected @grok, @codex, or a command")
 	}
 
 	command, err := shellwords.Fields(segment)

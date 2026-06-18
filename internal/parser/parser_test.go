@@ -14,11 +14,11 @@ func TestParseFileHumanSchedules(t *testing.T) {
 
 	file, err := Parse(`
 # comment
-daily 11am,12pm,1pm ~/Work/example "Review the repo."
-weekdays 9:30am "` + home + `/Work/notes" "Summarize \"notes\"."
-weekends 5am /tmp "Clean temp notes."
-mondays 17:15 /tmp "Prepare the weekly review."
-now "Run once from home."
+daily 11am,12pm,1pm ~/Work/example @codex "Review the repo."
+weekdays 9:30am "` + home + `/Work/notes" @codex "Summarize \"notes\"."
+weekends 5am /tmp @codex "Clean temp notes."
+mondays 17:15 /tmp @codex "Prepare the weekly review."
+now @codex "Run once from home."
 `, "Asia/Kolkata")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ now "Run once from home."
 }
 
 func TestParseFileDefaultsToUTC(t *testing.T) {
-	file, err := Parse(`daily 11am "Run tests."`, "UTC")
+	file, err := Parse(`daily 11am @codex "Run tests."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestParseFileUsesHomeWhenCWDIsOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	file, err := Parse(`weekdays 9am "Plan the day."`, "UTC")
+	file, err := Parse(`weekdays 9am @codex "Plan the day."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,8 +103,8 @@ func TestParseFileSupportsHourlySchedules(t *testing.T) {
 	}
 
 	file, err := Parse(`
-hourly "Run from home."
-hourly at 15 ~/Work/example "Run from repo."
+hourly @codex "Run from home."
+hourly at 15 ~/Work/example @codex "Run from repo."
 `, "UTC")
 	if err != nil {
 		t.Fatal(err)
@@ -232,13 +232,13 @@ daily 5am ~/.local/bin/gmail sync --all
 	}
 }
 
-func TestParseFileDefaultsQuotedPromptToCodex(t *testing.T) {
-	file, err := Parse(`daily 11am "Run tests."`, "UTC")
-	if err != nil {
-		t.Fatal(err)
+func TestParseFileRejectsBareQuotedPrompt(t *testing.T) {
+	_, err := Parse(`weekdays 9am "do something"`, "UTC")
+	if err == nil {
+		t.Fatal("expected parse error")
 	}
-	if file.Jobs[0].Kind != JobKindCodex {
-		t.Fatalf("expected codex default, got %s", file.Jobs[0].Kind)
+	if !strings.Contains(err.Error(), "AI jobs require @codex or @grok") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -253,7 +253,7 @@ func TestParseFileRejectsAgentWithoutPrompt(t *testing.T) {
 }
 
 func TestFindJobByPrefix(t *testing.T) {
-	jobs, err := ParseFile(`daily 11am "Run tests."`, "UTC")
+	jobs, err := ParseFile(`daily 11am @codex "Run tests."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}

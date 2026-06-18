@@ -101,14 +101,14 @@ func sampleConfig() string {
 #   Times: 11am, 9:30am, 5pm, 17:15
 #
 # Examples:
-#   now "Run once with Codex when looptab loads."
+#   now @codex "Run once when looptab loads."
 #   daily 5am @grok "Review email." ? notify heading "gmail" body "review finished" : notify heading "gmail" body "review failed"
 #   daily 11am,12pm ~/Work/example @codex "Review the repo."
-#   hourly ~/Work/example "Summarize notes."
+#   hourly ~/Work/example @codex "Summarize notes."
 #   hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : "backup failed"
 #   hourly at 15 notify heading "gdrive" body "backup started" && gdrive sync run
-#   weekdays 9am "Plan the day."
-#   weekends 5am "Weekly cleanup."
+#   weekdays 9am @codex "Plan the day."
+#   weekends 5am @codex "Weekly cleanup."
 #   mondays 17:15 roi track once
 #   every 30s tm snapshot sessions
 `)

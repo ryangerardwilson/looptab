@@ -36,7 +36,7 @@ func (b *lockedBuffer) String() string {
 }
 
 func TestSelectJobByIndex(t *testing.T) {
-	jobs, err := parser.ParseFile(`daily 5am "One."`+"\n"+`hourly "Two."`, "UTC")
+	jobs, err := parser.ParseFile(`daily 5am @codex "One."`+"\n"+`hourly @codex "Two."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestSelectJobByIndex(t *testing.T) {
 }
 
 func TestSelectJobByIDPrefix(t *testing.T) {
-	jobs, err := parser.ParseFile(`daily 5am "One."`, "UTC")
+	jobs, err := parser.ParseFile(`daily 5am @codex "One."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestSelectJobByIDPrefix(t *testing.T) {
 }
 
 func TestSelectJobRejectsOutOfRangeIndex(t *testing.T) {
-	jobs, err := parser.ParseFile(`daily 5am "One."`, "UTC")
+	jobs, err := parser.ParseFile(`daily 5am @codex "One."`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestTruncateJobAction(t *testing.T) {
 func TestEditSnapshotDetectsUnchangedFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "looptab")
-	if err := os.WriteFile(path, []byte("daily 5am \"Run tests.\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("daily 5am @codex \"Run tests.\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
