@@ -13,7 +13,7 @@ import (
 	"github.com/ryangerardwilson/looptab/internal/paths"
 )
 
-func runInteractiveNow(p paths.Paths) error {
+func runNowCommand(p paths.Paths, args []string) error {
 	file, err := loadFile(p)
 	if err != nil {
 		return err
@@ -23,10 +23,25 @@ func runInteractiveNow(p paths.Paths) error {
 		return nil
 	}
 
+	switch len(args) {
+	case 0:
+		return runInteractiveNowSelect(p, file)
+	case 1:
+		job, err := selectJob(file.Jobs, args[0])
+		if err != nil {
+			return err
+		}
+		return runJobOnce(p, file, job)
+	default:
+		return errors.New("expected `looptab now` or `looptab now <index-or-job-id>`")
+	}
+}
+
+func runInteractiveNowSelect(p paths.Paths, file parser.File) error {
 	printRegisteredJobs(os.Stdout, file.Jobs)
 
 	if !isTTY(os.Stdin) {
-		return errors.New("looptab now requires an interactive terminal\nrun `looptab run job <id>` instead")
+		return errors.New("looptab now requires an interactive terminal\nrun `looptab now <index-or-job-id>` instead")
 	}
 
 	fmt.Fprint(os.Stdout, "Run which job now? [index, job id, Enter to cancel]: ")
