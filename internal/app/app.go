@@ -149,14 +149,14 @@ func runJobOnce(p paths.Paths, file parser.File, job parser.Job) error {
 		defer handle.End()
 	}
 
-	var liveWriter io.Writer
+	var liveWriter io.Writer = os.Stdout
 	var liveOutput *os.File
 	if handle != nil && handle.OutputPath() != "" {
 		liveOutput, err = os.OpenFile(handle.OutputPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "looptab live output failed: %v\n", err)
 		} else {
-			liveWriter = liveOutput
+			liveWriter = io.MultiWriter(os.Stdout, liveOutput)
 		}
 	}
 
