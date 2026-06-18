@@ -91,22 +91,60 @@ func DisplayPath(path string) string {
 func sampleConfig() string {
 	return fmt.Sprintf(`# Looptab
 #
+# Looptab is the source of truth for scheduled work on this machine.
+# Add recurring jobs here instead of enabling per-app systemd timers.
+#
 # Format:
 #   timezone <IANA name>
 #   <when> [cwd] <action> [&& <action>...]
 #
+# Optional cwd must be absolute or start with ~. It applies to every step in
+# the line. Omit it to run from ~.
+#
+# Actions (one per step; chain with &&):
+#   "<prompt>"                 Codex (default)
+#   @codex "<prompt>"          Codex explicit
+#   @grok "<prompt>"           Grok headless single-turn
+#   <command> [args...]        direct command (PATH name or absolute path)
+#
+# Direct commands exec without a shell: no pipes, redirects, or && inside one
+# step. Chain separate steps with && instead.
+#
+# Chains behave like shell &&: each step runs only if the previous step exits 0.
+#
+# notify — Quickshell bar toast (falls back to notify-send):
+#   notify "title" [body]
+#   notify --urgency critical "title" [body]
+# Example chains:
+#   daily 5am @grok "do something" && notify "done" "something was done"
+#   hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
+#
+# Schedules:
+#   now                        run once when looptab loads
+#   hourly
+#   hourly at <minute>
+#   every <duration>           e.g. every 30s, every 5m, every 1h
+#   daily <time[,time...]>     e.g. daily 5am, daily 11am,12pm,1pm
+#   weekdays <time[,time...]>
+#   weekends <time[,time...]>
+#   monday|mondays … sunday|sundays <time[,time...]>
+#
+# Times: 11am, 9:30am, 5pm, 17:15, or comma-separated lists.
+#
 # Examples:
-#   timezone UTC
 #   now "Run once with Codex from home when looptab loads."
 #   daily 5am @grok "Check my emails and prepare me a brief." && notify "brief" "done"
+#   daily 11am ~/Work/example @codex "Review the repo."
 #   hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
 #   every 30s tm snapshot sessions
 #   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
 #   weekdays 9am ~/Work/example "Plan the day and update TODOs."
 #
-# Run:
+# Manage:
 #   looptab check
-#   looptab run
+#   looptab run | looptab run now | looptab run job <id>
+#   looptab status | looptab inspect <id> | looptab stream
+#   looptab service restart
 timezone UTC
 `)
 }
