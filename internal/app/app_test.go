@@ -3,7 +3,10 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -30,6 +33,48 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestEditSnapshotDetectsUnchangedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "looptab")
+	if err := os.WriteFile(path, []byte("daily 5am \"Run tests.\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := snapshotFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := snapshotFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !(editSnapshot{looptab: before}).unchanged(editSnapshot{looptab: after}) {
+		t.Fatal("expected unchanged snapshot")
+	}
+}
+
+func TestEditorAbortedDetectsExitError(t *testing.T) {
+	if editorAborted(nil) {
+		t.Fatal("expected nil to be treated as success")
+	}
+
+	err := exec.Command("sh", "-c", "exit 2").Run()
+	if err == nil {
+		t.Fatal("expected command to fail")
+	}
+	if !editorAborted(err) {
+		t.Fatalf("expected exit error to count as editor abort: %T %v", err, err)
+	}
+
+	wrapped := fmt.Errorf("editor failed: %w", err)
+	if !editorAborted(wrapped) {
+		t.Fatal("expected wrapped exit error to count as editor abort")
+	}
+	if editorAborted(errors.New("boom")) {
+		t.Fatal("expected generic error to be false")
+	}
 }
 
 func TestLastOutputLines(t *testing.T) {

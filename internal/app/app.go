@@ -36,13 +36,7 @@ func Run(args []string, version string) error {
 	}
 
 	if len(args) == 0 {
-		if err := ensureLayout(p); err != nil {
-			return err
-		}
-		if err := editor.Open(p.ConfigFile); err != nil {
-			return err
-		}
-		return ensureSchedulerAfterEdit(p, os.Stdout)
+		return openEditor(p)
 	}
 
 	switch args[0] {
@@ -941,6 +935,74 @@ func ensureLayout(p paths.Paths) error {
 		return err
 	}
 	return paths.EnsureConfigFile(p)
+}
+
+type fileSnapshot struct {
+	modTime time.Time
+	size    int64
+}
+
+type editSnapshot struct {
+	looptab fileSnapshot
+}
+
+func openEditor(p paths.Paths) error {
+	if err := ensureLayout(p); err != nil {
+		return err
+	}
+
+	before, err := snapshotEditState(p)
+	if err != nil {
+		return err
+	}
+
+	if err := editor.Open(p.ConfigFile); err != nil {
+		if editorAborted(err) {
+			return nil
+		}
+		return err
+	}
+
+	after, err := snapshotEditState(p)
+	if err != nil {
+		return err
+	}
+	if before.unchanged(after) {
+		return nil
+	}
+
+	return ensureSchedulerAfterEdit(p, os.Stdout)
+}
+
+func snapshotFile(path string) (fileSnapshot, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fileSnapshot{}, nil
+		}
+		return fileSnapshot{}, err
+	}
+	return fileSnapshot{
+		modTime: stat.ModTime(),
+		size:    stat.Size(),
+	}, nil
+}
+
+func snapshotEditState(p paths.Paths) (editSnapshot, error) {
+	looptab, err := snapshotFile(p.ConfigFile)
+	if err != nil {
+		return editSnapshot{}, err
+	}
+	return editSnapshot{looptab: looptab}, nil
+}
+
+func (before editSnapshot) unchanged(after editSnapshot) bool {
+	return before.looptab == after.looptab
+}
+
+func editorAborted(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
 }
 
 func printNowNotice(p paths.Paths, w io.Writer) error {
