@@ -89,53 +89,27 @@ func DisplayPath(path string) string {
 }
 
 func sampleConfig() string {
-	return fmt.Sprintf(`# Looptab
-#
-# Looptab is the source of truth for scheduled work on this machine.
-# Add recurring jobs here instead of enabling per-app systemd timers.
-#
-# Format:
-#   <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
-#
-# Timezone is configured in config.json beside this file.
-#
-# Optional cwd must be absolute or start with ~. It applies to every step in
-# the line. Omit it to run from ~.
-#
-# Actions:
-#   "<prompt>"                 Codex (default)
-#   @codex "<prompt>"          Codex explicit
-#   @grok "<prompt>"           Grok headless single-turn
-#   <command> [args...]        direct command (PATH name or absolute path)
-#
-# Direct commands exec without a shell: no pipes, redirects, or && inside one
-# step. Chain separate steps with && instead.
-#
-# Outcomes — run a follow-up based on the previous step's exit code:
-#   <action> ? <on-success> [: <on-failure>]
-# Each branch is a full action or a quoted body shorthand for notify.
-# Quoted shorthand uses heading "looptab" and adds --urgency critical on failure.
-#
-# notify — Quickshell bar toast (falls back to notify-send):
-#   notify heading "<title>" body "<message>"
-#   notify --urgency critical heading "<title>" body "<message>"
-#
-# Schedules:
-#   now                        run once when looptab loads
+	return fmt.Sprintf(`# Schedules:
+#   now
 #   hourly
 #   hourly at <minute>
-#   every <duration>           e.g. every 30s, every 5m, every 1h
-#   daily <time[,time...]>     e.g. daily 5am, daily 11am,12pm,1pm
+#   every <duration>
+#   daily <time[,time...]>
 #   weekdays <time[,time...]>
 #   weekends <time[,time...]>
 #   monday|mondays … sunday|sundays <time[,time...]>
-#
-# Times: 11am, 9:30am, 5pm, 17:15, or comma-separated lists.
+#   Times: 11am, 9:30am, 5pm, 17:15
 #
 # Examples:
-#   now "Run once with Codex from home when looptab loads."
-#   daily 5am @grok "Check my emails." ? notify heading "gmail" body "inbox review finished" : notify heading "gmail" body "inbox review failed"
-#   hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : notify heading "gdrive" body "backup failed"
+#   now "Run once with Codex when looptab loads."
+#   daily 5am @grok "Review email." ? notify heading "gmail" body "review finished" : notify heading "gmail" body "review failed"
+#   daily 11am,12pm ~/Work/example @codex "Review the repo."
+#   hourly ~/Work/example "Summarize notes."
+#   hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : "backup failed"
+#   hourly at 15 notify heading "gdrive" body "backup started" && gdrive sync run
+#   weekdays 9am "Plan the day."
+#   weekends 5am "Weekly cleanup."
+#   mondays 17:15 roi track once
 #   every 30s tm snapshot sessions
 `)
 }
