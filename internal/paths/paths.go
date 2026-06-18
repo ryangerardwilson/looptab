@@ -113,15 +113,12 @@ func sampleConfig() string {
 #
 # Outcomes — run a follow-up based on the previous step's exit code:
 #   <action> ? <on-success> [: <on-failure>]
-# Each branch is a full action or a quoted notify title shorthand.
-# Quoted shorthand on failure adds --urgency critical automatically.
-#
-# Sequences — chain with && when a later step should run only after success:
-#   hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "failed"
+# Each branch is a full action or a quoted body shorthand for notify.
+# Quoted shorthand uses heading "looptab" and adds --urgency critical on failure.
 #
 # notify — Quickshell bar toast (falls back to notify-send):
-#   notify "title" [body]
-#   notify --urgency critical "title" [body]
+#   notify heading "<title>" body "<message>"
+#   notify --urgency critical heading "<title>" body "<message>"
 #
 # Schedules:
 #   now                        run once when looptab loads
@@ -137,17 +134,8 @@ func sampleConfig() string {
 #
 # Examples:
 #   now "Run once with Codex from home when looptab loads."
-#   daily 5am @grok "Check my emails and prepare me a brief." ? notify "brief" "done" : "brief failed"
-#   daily 11am ~/Work/example @codex "Review the repo."
-#   hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "gdrive failed"
+#   daily 5am @grok "Check my emails." ? notify heading "gmail" body "inbox review finished" : notify heading "gmail" body "inbox review failed"
+#   hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : notify heading "gdrive" body "backup failed"
 #   every 30s tm snapshot sessions
-#   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
-#   weekdays 9am ~/Work/example "Plan the day and update TODOs."
-#
-# Manage:
-#   looptab check
-#   looptab run | looptab run now | looptab run job <id>
-#   looptab status | looptab inspect <id> | looptab stream
-#   looptab service restart
 `)
 }

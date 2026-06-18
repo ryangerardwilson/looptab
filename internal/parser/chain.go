@@ -272,9 +272,9 @@ func parseOutcomeBranch(text string, isFailure bool) (Step, error) {
 		return Step{}, err
 	}
 	if len(tokens) == 1 && tokens[0].quoted {
-		command := []string{"notify", tokens[0].value}
+		command := []string{"notify", "heading", "looptab", "body", tokens[0].value}
 		if isFailure {
-			command = append(command, "--urgency", "critical")
+			command = append([]string{"notify", "--urgency", "critical"}, command[1:]...)
 		}
 		return Step{Kind: JobKindCommand, Command: command}, nil
 	}

@@ -1136,8 +1136,8 @@ features:
 
   # <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
   now "Run once with Codex from home when looptab loads."
-  daily 5am @grok "Check my emails and prepare me a brief." ? notify "brief" "done" : "brief failed"
-  hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "gdrive failed"
+  daily 5am @grok "Check my emails." ? notify heading "gmail" body "inbox review finished" : notify heading "gmail" body "inbox review failed"
+  hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : notify heading "gdrive" body "backup failed"
   every 30s tm snapshot sessions
   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
   weekdays 9am ~/Work/example "Plan the day and update TODOs."

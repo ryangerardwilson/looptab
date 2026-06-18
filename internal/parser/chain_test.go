@@ -26,7 +26,7 @@ func TestParseActionChain(t *testing.T) {
 }
 
 func TestParseOutcomeSyntax(t *testing.T) {
-	file, err := Parse(`daily 5am @grok "do something" ? notify "something was done" : "something failed"`, "UTC")
+	file, err := Parse(`daily 5am @grok "do something" ? notify heading "grok" body "something was done" : "something failed"`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,27 +38,30 @@ func TestParseOutcomeSyntax(t *testing.T) {
 	if step.Kind != JobKindGrok || step.OnSuccess == nil || step.OnFailure == nil {
 		t.Fatalf("unexpected step: %+v", step)
 	}
-	if step.OnSuccess.Command[0] != "notify" || step.OnSuccess.Command[1] != "something was done" {
+	wantSuccess := []string{"notify", "heading", "grok", "body", "something was done"}
+	if len(step.OnSuccess.Command) != len(wantSuccess) {
 		t.Fatalf("unexpected success outcome: %v", step.OnSuccess.Command)
 	}
-	if step.OnFailure.Command[0] != "notify" || step.OnFailure.Command[1] != "something failed" {
-		t.Fatalf("unexpected failure outcome: %v", step.OnFailure.Command)
+	for i, want := range wantSuccess {
+		if step.OnSuccess.Command[i] != want {
+			t.Fatalf("success arg %d: expected %q, got %q", i, want, step.OnSuccess.Command[i])
+		}
 	}
-	if step.OnFailure.Command[len(step.OnFailure.Command)-2] != "--urgency" {
-		t.Fatalf("expected failure notify to be critical: %v", step.OnFailure.Command)
+	wantFailure := []string{"notify", "--urgency", "critical", "heading", "looptab", "body", "something failed"}
+	for i, want := range wantFailure {
+		if step.OnFailure.Command[i] != want {
+			t.Fatalf("failure arg %d: expected %q, got %v", i, want, step.OnFailure.Command)
+		}
 	}
 }
 
-func TestParseOutcomeWithChain(t *testing.T) {
-	file, err := Parse(`hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : notify "gdrive" "failed" --urgency critical`, "UTC")
+func TestParseOutcomeGdriveJob(t *testing.T) {
+	file, err := Parse(`hourly gdrive sync run ? notify heading "gdrive" body "backup finished" : notify heading "gdrive" body "backup failed"`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
 	job := file.Jobs[0]
-	if len(job.Steps) != 2 {
-		t.Fatalf("expected 2 steps, got %d", len(job.Steps))
-	}
-	if job.Steps[0].OnSuccess != nil || job.Steps[1].OnSuccess == nil || job.Steps[1].OnFailure == nil {
+	if len(job.Steps) != 1 || job.Steps[0].OnSuccess == nil || job.Steps[0].OnFailure == nil {
 		t.Fatalf("unexpected outcome placement: %+v", job.Steps)
 	}
 }
