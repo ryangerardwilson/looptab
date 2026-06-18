@@ -13,7 +13,6 @@ import (
 	"unicode"
 
 	"github.com/robfig/cron/v3"
-	"github.com/ryangerardwilson/looptab/internal/shellwords"
 )
 
 const DefaultTimezone = "UTC"
@@ -38,23 +37,14 @@ type Job struct {
 	Schedule  string
 	CronSpecs []string
 	Once      bool
+	Interval  time.Duration
 	Timezone  string
 	Kind      JobKind
 	CWD       string
 	Prompt    string
 	Command   []string
+	Steps     []Step
 	Raw       string
-}
-
-func (j Job) ActionDisplay() string {
-	switch j.Kind {
-	case JobKindCommand:
-		return strings.Join(j.Command, " ")
-	case JobKindGrok:
-		return "@grok " + strconv.Quote(j.Prompt)
-	default:
-		return strconv.Quote(j.Prompt)
-	}
 }
 
 type ParseErrors []error
@@ -153,12 +143,12 @@ func FindJob(jobs []Job, id string) (Job, error) {
 }
 
 func parseLine(lineNumber int, line string, timezone string) (Job, error) {
-	schedule, cwd, kind, prompt, command, err := splitJobLine(line)
+	schedule, cwd, steps, err := splitJobLine(line)
 	if err != nil {
 		return Job{}, lineErr(lineNumber, err.Error())
 	}
 
-	cronSpecs, once, err := compileSchedule(schedule)
+	cronSpecs, once, interval, err := compileSchedule(schedule)
 	if err != nil {
 		return Job{}, lineErr(lineNumber, err.Error())
 	}
@@ -168,19 +158,20 @@ func parseLine(lineNumber int, line string, timezone string) (Job, error) {
 		return Job{}, lineErr(lineNumber, err.Error())
 	}
 
-	return Job{
-		ID:        jobID(lineNumber, schedule, expanded, kind, prompt, command),
+	job := Job{
+		ID:        jobID(lineNumber, schedule, expanded, steps),
 		Line:      lineNumber,
 		Schedule:  schedule,
 		CronSpecs: cronSpecs,
 		Once:      once,
+		Interval:  interval,
 		Timezone:  timezone,
-		Kind:      kind,
 		CWD:       expanded,
-		Prompt:    prompt,
-		Command:   command,
+		Steps:     steps,
 		Raw:       line,
-	}, nil
+	}
+	syncPrimaryFields(&job)
+	return job, nil
 }
 
 func isTimezoneDirective(line string) bool {
@@ -241,192 +232,6 @@ func canonicalTimezoneCandidate(name string) string {
 	return strings.Join(parts, "/")
 }
 
-func splitJobLine(line string) (string, string, JobKind, string, []string, error) {
-	tokens, err := scanTokens(line)
-	if err != nil {
-		return "", "", "", "", nil, err
-	}
-	if len(tokens) == 0 {
-		return "", "", "", "", nil, errors.New("expected <when> [cwd] \"<prompt>\", @grok \"<prompt>\", or <executable> [args...]")
-	}
-
-	if promptIndex := quotedPromptIndex(tokens); promptIndex >= 0 {
-		return splitAgentJobLine(line, tokens, promptIndex)
-	}
-	return splitCommandJobLine(line, tokens)
-}
-
-func splitAgentJobLine(line string, tokens []token, promptIndex int) (string, string, JobKind, string, []string, error) {
-	promptToken := tokens[promptIndex]
-	if promptToken.value == "" {
-		return "", "", "", "", nil, errors.New("prompt must not be empty")
-	}
-	if err := ensureNoTrailingAction(line, promptToken.end); err != nil {
-		return "", "", "", "", nil, err
-	}
-
-	kind := JobKindCodex
-	scheduleEnd := promptToken.start
-	cwd := "~"
-
-	if promptIndex > 0 {
-		previous := tokens[promptIndex-1]
-		if agent, ok := agentKind(previous.value); ok {
-			kind = agent
-			scheduleEnd = previous.start
-			if promptIndex > 1 {
-				candidate := tokens[promptIndex-2]
-				if isCWDToken(candidate.value) {
-					cwd = candidate.value
-					scheduleEnd = candidate.start
-				} else if looksLikeRelativePath(candidate.value) {
-					return "", "", "", "", nil, errors.New("cwd must be absolute or start with ~")
-				}
-			}
-		} else if isCWDToken(previous.value) {
-			cwd = previous.value
-			scheduleEnd = previous.start
-		} else if looksLikeRelativePath(previous.value) {
-			return "", "", "", "", nil, errors.New("cwd must be absolute or start with ~")
-		}
-	}
-
-	schedule := strings.TrimSpace(line[:scheduleEnd])
-	if schedule == "" {
-		return "", "", "", "", nil, errors.New("expected schedule before action")
-	}
-	return schedule, cwd, kind, promptToken.value, nil, nil
-}
-
-func splitCommandJobLine(line string, tokens []token) (string, string, JobKind, string, []string, error) {
-	for _, tok := range tokens {
-		if kind, ok := agentKind(tok.value); ok {
-			return "", "", "", "", nil, fmt.Errorf("%s requires a quoted prompt", kindMarker(kind))
-		}
-	}
-
-	scheduleCount, err := scheduleTokenCount(tokens)
-	if err != nil {
-		return "", "", "", "", nil, err
-	}
-	if scheduleCount >= len(tokens) {
-		return "", "", "", "", nil, errors.New("expected an executable after the schedule")
-	}
-
-	schedule := strings.Join(tokenValues(tokens[:scheduleCount]), " ")
-	remainder := tokens[scheduleCount:]
-	cwd := "~"
-	actionStart := 0
-
-	if len(remainder) > 0 && looksLikeRelativePath(remainder[0].value) {
-		return "", "", "", "", nil, errors.New("cwd must be absolute or start with ~")
-	}
-	if len(remainder) > 0 && isCWDToken(remainder[0].value) && remainderLooksLikeCWD(remainder) {
-		cwd = remainder[0].value
-		actionStart = 1
-	}
-	if actionStart >= len(remainder) {
-		return "", "", "", "", nil, errors.New("expected an executable after the schedule")
-	}
-
-	action := remainder[actionStart:]
-	if len(action) == 0 {
-		return "", "", "", "", nil, errors.New("expected quoted prompt, @grok, @codex, or an executable path")
-	}
-	if kind, ok := agentKind(action[0].value); ok {
-		return "", "", "", "", nil, fmt.Errorf("%s requires a quoted prompt", kindMarker(kind))
-	}
-	if !isExecutableToken(action[0].value) {
-		return "", "", "", "", nil, errors.New("expected quoted prompt, @grok, @codex, or an executable path")
-	}
-
-	commandTail := strings.TrimSpace(line[action[0].start:])
-	commentIndex := strings.Index(commandTail, " #")
-	if commentIndex >= 0 {
-		commandTail = strings.TrimSpace(commandTail[:commentIndex])
-	}
-	command, err := shellwords.Fields(commandTail)
-	if err != nil {
-		return "", "", "", "", nil, err
-	}
-	if len(command) == 0 {
-		return "", "", "", "", nil, errors.New("executable path must not be empty")
-	}
-	return schedule, cwd, JobKindCommand, "", command, nil
-}
-
-func quotedPromptIndex(tokens []token) int {
-	promptIndex := -1
-	for i, tok := range tokens {
-		if !tok.quoted && strings.HasPrefix(tok.value, "#") {
-			break
-		}
-		if tok.quoted {
-			promptIndex = i
-		}
-	}
-	return promptIndex
-}
-
-func scheduleTokenCount(tokens []token) (int, error) {
-	if len(tokens) < 2 {
-		return 0, errors.New("expected schedule and action")
-	}
-	if len(tokens) == 3 &&
-		strings.EqualFold(tokens[0].value, "hourly") &&
-		strings.EqualFold(tokens[1].value, "at") {
-		schedule := strings.Join(tokenValues(tokens), " ")
-		if _, _, err := compileSchedule(schedule); err != nil {
-			return 0, err
-		}
-	}
-
-	var lastErr error
-	for i := len(tokens) - 1; i >= 1; i-- {
-		schedule := strings.Join(tokenValues(tokens[:i]), " ")
-		_, _, err := compileSchedule(schedule)
-		if err == nil {
-			if strings.EqualFold(tokens[0].value, "hourly") &&
-				strings.EqualFold(tokens[1].value, "at") &&
-				i < 3 {
-				lastErr = errors.New("hourly accepts no time or `at <minute>`")
-				continue
-			}
-			return i, nil
-		}
-		lastErr = err
-		if scheduleParseLooksComplete(err, i, len(tokens)) {
-			return 0, err
-		}
-	}
-	if lastErr != nil {
-		return 0, lastErr
-	}
-	return 0, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
-}
-
-func scheduleParseLooksComplete(err error, consumed, total int) bool {
-	if err == nil {
-		return false
-	}
-	text := err.Error()
-	if consumed < total && strings.Contains(text, "invalid time") {
-		return false
-	}
-	switch {
-	case strings.Contains(text, "now does not accept a time"):
-		return true
-	case strings.Contains(text, "invalid hourly minute"):
-		return true
-	case strings.Contains(text, "invalid time"):
-		return true
-	case strings.Contains(text, "expected at least one time"):
-		return true
-	default:
-		return false
-	}
-}
-
 func tokenValues(tokens []token) []string {
 	values := make([]string, len(tokens))
 	for i, tok := range tokens {
@@ -453,14 +258,6 @@ func kindMarker(kind JobKind) string {
 	default:
 		return "@codex"
 	}
-}
-
-func ensureNoTrailingAction(line string, end int) error {
-	trailing := strings.TrimSpace(line[end:])
-	if trailing != "" && !strings.HasPrefix(trailing, "#") {
-		return fmt.Errorf("unexpected trailing text after action: %s", trailing)
-	}
-	return nil
 }
 
 func scanTokens(input string) ([]token, error) {
@@ -535,10 +332,6 @@ func looksLikeRelativePath(value string) bool {
 		strings.HasPrefix(value, "../")
 }
 
-func isExecutableToken(value string) bool {
-	return isCWDToken(value)
-}
-
 func remainderLooksLikeCWD(remainder []token) bool {
 	if len(remainder) < 2 {
 		return false
@@ -550,40 +343,50 @@ func remainderLooksLikeCWD(remainder []token) bool {
 	return next.quoted
 }
 
-func compileSchedule(input string) ([]string, bool, error) {
+func compileSchedule(input string) ([]string, bool, time.Duration, error) {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
-		return nil, false, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
+		return nil, false, 0, errors.New("expected schedule like `daily 11am`, `hourly`, `every 30s`, or `now`")
 	}
 
 	frequency := strings.ToLower(parts[0])
+	if frequency == "every" {
+		if len(parts) != 2 {
+			return nil, false, 0, errors.New("every accepts exactly one duration")
+		}
+		interval, err := parseEveryDuration(parts[1])
+		if err != nil {
+			return nil, false, 0, err
+		}
+		return nil, false, interval, nil
+	}
 	if frequency == "now" {
 		if len(parts) > 1 {
-			return nil, false, errors.New("now does not accept a time")
+			return nil, false, 0, errors.New("now does not accept a time")
 		}
-		return nil, true, nil
+		return nil, true, 0, nil
 	}
 	if frequency == "hourly" || frequency == "hour" || frequency == "hours" {
 		spec, err := compileHourlySpec(parts)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, err
 		}
-		return []string{spec}, false, nil
+		return []string{spec}, false, 0, nil
 	}
 
 	if len(parts) < 2 {
-		return nil, false, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
+		return nil, false, 0, errors.New("expected schedule like `daily 11am`, `hourly`, or `now`")
 	}
 
 	daySpec, err := compileDaySpec(frequency)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	timesText := strings.TrimSpace(strings.TrimPrefix(input, parts[0]))
 	times, err := parseTimeList(timesText)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	specs := make([]string, 0, len(times))
@@ -595,13 +398,73 @@ func compileSchedule(input string) ([]string, bool, error) {
 			continue
 		}
 		if _, err := cronParser.Parse(spec); err != nil {
-			return nil, false, fmt.Errorf("compiled invalid schedule %q: %w", spec, err)
+			return nil, false, 0, fmt.Errorf("compiled invalid schedule %q: %w", spec, err)
 		}
 		specs = append(specs, spec)
 		seen[spec] = true
 	}
 
-	return specs, false, nil
+	return specs, false, 0, nil
+}
+
+func parseEveryDuration(raw string) (time.Duration, error) {
+	text := strings.ToLower(strings.TrimSpace(raw))
+	if text == "" {
+		return 0, errors.New("every duration must not be empty")
+	}
+
+	multiplier := time.Second
+	switch {
+	case strings.HasSuffix(text, "ms"):
+		multiplier = time.Millisecond
+		text = strings.TrimSuffix(text, "ms")
+	case strings.HasSuffix(text, "secs"), strings.HasSuffix(text, "sec"), strings.HasSuffix(text, "seconds"):
+		if strings.HasSuffix(text, "seconds") {
+			text = strings.TrimSuffix(text, "seconds")
+		} else if strings.HasSuffix(text, "secs") {
+			text = strings.TrimSuffix(text, "secs")
+		} else {
+			text = strings.TrimSuffix(text, "sec")
+		}
+	case strings.HasSuffix(text, "mins"), strings.HasSuffix(text, "min"), strings.HasSuffix(text, "minutes"):
+		multiplier = time.Minute
+		if strings.HasSuffix(text, "minutes") {
+			text = strings.TrimSuffix(text, "minutes")
+		} else if strings.HasSuffix(text, "mins") {
+			text = strings.TrimSuffix(text, "mins")
+		} else {
+			text = strings.TrimSuffix(text, "min")
+		}
+	case strings.HasSuffix(text, "hrs"), strings.HasSuffix(text, "hr"), strings.HasSuffix(text, "hours"):
+		multiplier = time.Hour
+		if strings.HasSuffix(text, "hours") {
+			text = strings.TrimSuffix(text, "hours")
+		} else if strings.HasSuffix(text, "hrs") {
+			text = strings.TrimSuffix(text, "hrs")
+		} else {
+			text = strings.TrimSuffix(text, "hr")
+		}
+	default:
+		if strings.HasSuffix(text, "s") {
+			text = strings.TrimSuffix(text, "s")
+		} else if strings.HasSuffix(text, "m") {
+			multiplier = time.Minute
+			text = strings.TrimSuffix(text, "m")
+		} else if strings.HasSuffix(text, "h") {
+			multiplier = time.Hour
+			text = strings.TrimSuffix(text, "h")
+		}
+	}
+
+	value, err := strconv.Atoi(text)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid every duration %q", raw)
+	}
+	duration := time.Duration(value) * multiplier
+	if duration < time.Second {
+		return 0, errors.New("every duration must be at least 1s")
+	}
+	return duration, nil
 }
 
 func compileHourlySpec(parts []string) (string, error) {
@@ -764,14 +627,17 @@ func expandCWD(cwd string) (string, error) {
 	return clean, nil
 }
 
-func jobID(line int, schedule, cwd string, kind JobKind, prompt string, command []string) string {
-	var key string
-	switch kind {
-	case JobKindCommand:
-		key = fmt.Sprintf("%d\x00%s\x00%s\x00command\x00%s", line, schedule, cwd, strings.Join(command, "\x00"))
-	default:
-		key = fmt.Sprintf("%d\x00%s\x00%s\x00%s\x00%s", line, schedule, cwd, kind, prompt)
+func jobID(line int, schedule, cwd string, steps []Step) string {
+	var parts []string
+	for _, step := range steps {
+		switch step.Kind {
+		case JobKindCommand:
+			parts = append(parts, "command:"+strings.Join(step.Command, "\x1f"))
+		default:
+			parts = append(parts, string(step.Kind)+":"+step.Prompt)
+		}
 	}
+	key := fmt.Sprintf("%d\x00%s\x00%s\x00%s", line, schedule, cwd, strings.Join(parts, "\x00"))
 	sum := sha1.Sum([]byte(key))
 	return hex.EncodeToString(sum[:])[:8]
 }

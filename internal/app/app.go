@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -870,33 +871,25 @@ func runCheck(p paths.Paths, w io.Writer) error {
 		if !info.IsDir() {
 			invalid = append(invalid, fmt.Sprintf("line %d: cwd is not a directory: %s", job.Line, job.CWD))
 		}
-		switch job.Kind {
-		case parser.JobKindGrok:
-			needsGrok = true
-		case parser.JobKindCommand:
-			if len(job.Command) == 0 {
-				invalid = append(invalid, fmt.Sprintf("line %d: command job is missing an executable", job.Line))
-				continue
-			}
-			executable := job.Command[0]
-			if strings.HasPrefix(executable, "~/") {
-				home, homeErr := os.UserHomeDir()
-				if homeErr != nil {
-					invalid = append(invalid, fmt.Sprintf("line %d: %v", job.Line, homeErr))
+		steps := job.Steps
+		if len(steps) == 0 {
+			steps = []parser.Step{{Kind: job.Kind, Prompt: job.Prompt, Command: job.Command}}
+		}
+		for _, step := range steps {
+			switch step.Kind {
+			case parser.JobKindGrok:
+				needsGrok = true
+			case parser.JobKindCommand:
+				if len(step.Command) == 0 {
+					invalid = append(invalid, fmt.Sprintf("line %d: command step is missing an executable", job.Line))
 					continue
 				}
-				executable = filepath.Join(home, strings.TrimPrefix(executable, "~/"))
+				if err := validateCommandExecutable(step.Command[0]); err != nil {
+					invalid = append(invalid, fmt.Sprintf("line %d: %v", job.Line, err))
+				}
+			default:
+				needsCodex = true
 			}
-			info, err := os.Stat(executable)
-			if err != nil {
-				invalid = append(invalid, fmt.Sprintf("line %d: executable does not exist: %s", job.Line, job.Command[0]))
-				continue
-			}
-			if info.IsDir() {
-				invalid = append(invalid, fmt.Sprintf("line %d: executable is a directory: %s", job.Line, job.Command[0]))
-			}
-		default:
-			needsCodex = true
 		}
 	}
 	if len(invalid) > 0 {
@@ -1023,6 +1016,30 @@ func schedulerActive(p paths.Paths) bool {
 	return err == nil
 }
 
+func validateCommandExecutable(executable string) error {
+	if strings.HasPrefix(executable, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		executable = filepath.Join(home, strings.TrimPrefix(executable, "~/"))
+	}
+	if filepath.IsAbs(executable) {
+		info, err := os.Stat(executable)
+		if err != nil {
+			return fmt.Errorf("executable does not exist: %s", executable)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("executable is a directory: %s", executable)
+		}
+		return nil
+	}
+	if _, err := exec.LookPath(executable); err != nil {
+		return fmt.Errorf("executable not found on PATH: %s", executable)
+	}
+	return nil
+}
+
 func actionDisplayForRecord(record runlog.Record) string {
 	if len(record.Command) > 0 {
 		return strings.Join(record.Command, " ")
@@ -1051,11 +1068,11 @@ features:
   # timezone <IANA name>
   timezone UTC
 
-  # <when> [cwd] "<prompt>" | @grok "<prompt>" | <executable> [args...]
+  # <when> [cwd] <action> [&& <action>...]
   now "Run once with Codex from home when looptab loads."
-  daily 5am @grok "Check my emails and prepare me a brief."
-  daily 11am @codex ~/Work/example "Review the repo and fix one small obvious issue."
-  daily 5am ~/.local/bin/gmail sync
+  daily 5am @grok "Check my emails and prepare me a brief." && notify "brief" "done"
+  hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
+  every 30s tm snapshot sessions
   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
   weekdays 9am ~/Work/example "Plan the day and update TODOs."
 

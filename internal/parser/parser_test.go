@@ -141,11 +141,11 @@ func TestParseFileRejectsOldCronSyntax(t *testing.T) {
 }
 
 func TestParseFileRejectsUnquotedPrompt(t *testing.T) {
-	_, err := Parse(`daily 11am Review the repo.`)
+	_, err := Parse(`daily Review the repo.`)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
-	if !strings.Contains(err.Error(), "expected quoted prompt") {
+	if !strings.Contains(err.Error(), "invalid time") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

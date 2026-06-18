@@ -93,14 +93,14 @@ func sampleConfig() string {
 #
 # Format:
 #   timezone <IANA name>
-#   <when> [cwd] "<prompt>" | @grok "<prompt>" | <executable> [args...]
+#   <when> [cwd] <action> [&& <action>...]
 #
 # Examples:
 #   timezone UTC
 #   now "Run once with Codex from home when looptab loads."
-#   daily 5am @grok "Check my emails and prepare me a brief."
-#   daily 11am @codex ~/Work/example "Review the repo and fix one small obvious issue."
-#   daily 5am ~/.local/bin/gmail sync
+#   daily 5am @grok "Check my emails and prepare me a brief." && notify "brief" "done"
+#   hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
+#   every 30s tm snapshot sessions
 #   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
 #   weekdays 9am ~/Work/example "Plan the day and update TODOs."
 #

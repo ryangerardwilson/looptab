@@ -47,7 +47,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		return err
 	}
 
-	active, err := s.startCron(ctx, file, mtime, runner, store)
+	active, err := s.startSchedules(ctx, file, mtime, runner, store)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			}
 
 			active.Stop()
-			active, err = s.startCron(ctx, nextFile, nextMTime, runner, store)
+			active, err = s.startSchedules(ctx, nextFile, nextMTime, runner, store)
 			if err != nil {
 				if !nextMTime.Equal(lastReloadErrorMTime) {
 					fmt.Fprintf(os.Stderr, "looptab reload failed: %v\n", err)
@@ -115,7 +115,24 @@ func (s *Scheduler) loadFile() (parser.File, time.Time, error) {
 	return file, stat.ModTime(), err
 }
 
-func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt time.Time, jobRunner runner.Runner, store runlog.Store) (*cron.Cron, error) {
+type scheduleHandle struct {
+	cron   *cron.Cron
+	cancel context.CancelFunc
+}
+
+func (h *scheduleHandle) Stop() {
+	if h.cancel != nil {
+		h.cancel()
+	}
+	if h.cron != nil {
+		h.cron.Stop()
+	}
+}
+
+func (s *Scheduler) startSchedules(parent context.Context, file parser.File, loadedAt time.Time, jobRunner runner.Runner, store runlog.Store) (*scheduleHandle, error) {
+	ctx, cancel := context.WithCancel(parent)
+	handle := &scheduleHandle{cancel: cancel}
+
 	parserSpec := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	c := cron.New(
 		cron.WithParser(parserSpec),
@@ -128,6 +145,7 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt ti
 		if localJob.Once {
 			claimed, err := oncejob.NewStore(s.paths).Claim(localJob, loadedAt)
 			if err != nil {
+				handle.Stop()
 				return nil, err
 			}
 			if !claimed {
@@ -135,6 +153,7 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt ti
 			}
 			alreadyAttempted, err := nowJobAlreadyAttemptedForLoad(store, localJob, loadedAt)
 			if err != nil {
+				handle.Stop()
 				return nil, err
 			}
 			if alreadyAttempted {
@@ -143,17 +162,37 @@ func (s *Scheduler) startCron(ctx context.Context, file parser.File, loadedAt ti
 			go s.runJob(ctx, localJob, jobRunner, store)
 			continue
 		}
+		if localJob.Interval > 0 {
+			go s.runInterval(ctx, localJob, jobRunner, store)
+			continue
+		}
 		for _, spec := range localJob.CronSpecs {
 			if _, err := c.AddFunc(spec, func() {
 				s.runJob(ctx, localJob, jobRunner, store)
 			}); err != nil {
+				handle.Stop()
 				return nil, err
 			}
 		}
 	}
 
 	c.Start()
-	return c, nil
+	handle.cron = c
+	return handle, nil
+}
+
+func (s *Scheduler) runInterval(ctx context.Context, job parser.Job, jobRunner runner.Runner, store runlog.Store) {
+	ticker := time.NewTicker(job.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runJob(ctx, job, jobRunner, store)
+		}
+	}
 }
 
 func nowJobAlreadyAttemptedForLoad(store runlog.Store, job parser.Job, loadedAt time.Time) (bool, error) {

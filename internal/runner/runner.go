@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -109,12 +110,62 @@ func (r Runner) RunWithOutputAndPID(ctx context.Context, job parser.Job, started
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
+
+	steps := job.Steps
+	if len(steps) == 0 {
+		steps = []parser.Step{{Kind: job.Kind, Prompt: job.Prompt, Command: job.Command}}
+	}
+
+	aggregate := Result{
+		StartedAt: startedAt,
+		ExitCode:  0,
+	}
+	var outputBuf strings.Builder
+	pidReported := false
+
+	for index, step := range steps {
+		stepJob := parser.Job{
+			CWD:     job.CWD,
+			Kind:    step.Kind,
+			Prompt:  step.Prompt,
+			Command: step.Command,
+		}
+		var stepOnStart func(int)
+		if !pidReported && onStart != nil {
+			stepOnStart = func(pid int) {
+				pidReported = true
+				onStart(pid)
+			}
+		}
+
+		stepResult := r.runStep(ctx, stepJob, aggregate.StartedAt, output, stepOnStart)
+		if outputBuf.Len() > 0 && stepResult.Output != "" {
+			outputBuf.WriteString("\n")
+		}
+		outputBuf.WriteString(stepResult.Output)
+		aggregate.Output = outputBuf.String()
+		aggregate.FinishedAt = stepResult.FinishedAt
+		aggregate.ExitCode = stepResult.ExitCode
+
+		if stepResult.Err != nil {
+			aggregate.Err = fmt.Errorf("step %d failed: %w", index+1, stepResult.Err)
+			return aggregate
+		}
+	}
+
+	if aggregate.FinishedAt.IsZero() {
+		aggregate.FinishedAt = time.Now()
+	}
+	return aggregate
+}
+
+func (r Runner) runStep(ctx context.Context, job parser.Job, startedAt time.Time, output io.Writer, onStart func(int)) Result {
 	result := Result{
 		StartedAt: startedAt,
 		ExitCode:  -1,
 	}
 
-	bin, args, label, err := r.commandForJob(job)
+	bin, args, label, err := r.commandForStep(job)
 	if err != nil {
 		result.FinishedAt = time.Now()
 		result.Err = err
@@ -170,7 +221,7 @@ func (r Runner) RunWithOutputAndPID(ctx context.Context, job parser.Job, started
 	return result
 }
 
-func (r *Runner) commandForJob(job parser.Job) (string, []string, string, error) {
+func (r *Runner) commandForStep(job parser.Job) (string, []string, string, error) {
 	switch job.Kind {
 	case parser.JobKindGrok:
 		if job.Prompt == "" {
@@ -185,7 +236,7 @@ func (r *Runner) commandForJob(job parser.Job) (string, []string, string, error)
 		if len(job.Command) == 0 {
 			return "", nil, "", errors.New("command job is missing an executable")
 		}
-		executable, err := expandExecutable(job.Command[0])
+		executable, err := resolveExecutable(job.Command[0])
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -226,7 +277,7 @@ func (r *Runner) grokBin() (string, error) {
 	return bin, nil
 }
 
-func expandExecutable(path string) (string, error) {
+func resolveExecutable(path string) (string, error) {
 	if path == "~" || stringsHasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -237,8 +288,16 @@ func expandExecutable(path string) (string, error) {
 		} else {
 			path = filepath.Join(home, path[2:])
 		}
+		return filepath.Clean(path), nil
 	}
-	return filepath.Clean(path), nil
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	bin, err := exec.LookPath(path)
+	if err != nil {
+		return "", fmt.Errorf("executable not found on PATH: %s", path)
+	}
+	return bin, nil
 }
 
 func stringsHasPrefix(s, prefix string) bool {
