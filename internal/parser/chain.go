@@ -10,12 +10,26 @@ import (
 )
 
 type Step struct {
-	Kind    JobKind
-	Prompt  string
-	Command []string
+	Kind      JobKind
+	Prompt    string
+	Command   []string
+	OnSuccess *Step
+	OnFailure *Step
 }
 
 func (s Step) Display() string {
+	base := s.displayPrimary()
+	if s.OnSuccess == nil && s.OnFailure == nil {
+		return base
+	}
+	text := base + " ? " + s.OnSuccess.Display()
+	if s.OnFailure != nil {
+		text += " : " + s.OnFailure.Display()
+	}
+	return text
+}
+
+func (s Step) displayPrimary() string {
 	switch s.Kind {
 	case JobKindCommand:
 		return strings.Join(s.Command, " ")
@@ -36,7 +50,7 @@ func splitJobLine(line string) (string, string, []Step, error) {
 		return "", "", nil, err
 	}
 	if len(tokens) == 0 {
-		return "", "", nil, errors.New("expected <when> [cwd] <action> [&& <action>...]")
+		return "", "", nil, errors.New("expected <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]")
 	}
 
 	scheduleCount, err := parseSchedulePrefix(tokens)
@@ -141,6 +155,35 @@ func parseActionChain(actionText string) ([]Step, error) {
 }
 
 func parseActionSegment(segment string) (Step, error) {
+	primary, successText, failureText, hasOutcome, err := splitOutcome(segment)
+	if err != nil {
+		return Step{}, err
+	}
+
+	step, err := parsePrimaryAction(primary)
+	if err != nil {
+		return Step{}, err
+	}
+	if !hasOutcome {
+		return step, nil
+	}
+
+	onSuccess, err := parseOutcomeBranch(successText, false)
+	if err != nil {
+		return Step{}, fmt.Errorf("success outcome: %w", err)
+	}
+	step.OnSuccess = &onSuccess
+	if failureText != "" {
+		onFailure, err := parseOutcomeBranch(failureText, true)
+		if err != nil {
+			return Step{}, fmt.Errorf("failure outcome: %w", err)
+		}
+		step.OnFailure = &onFailure
+	}
+	return step, nil
+}
+
+func parsePrimaryAction(segment string) (Step, error) {
 	tokens, err := scanTokens(segment)
 	if err != nil {
 		return Step{}, err
@@ -184,6 +227,83 @@ func parseActionSegment(segment string) (Step, error) {
 		return Step{}, errors.New("command must not be empty")
 	}
 	return Step{Kind: JobKindCommand, Command: command}, nil
+}
+
+func splitOutcome(segment string) (primary, success, failure string, hasOutcome bool, err error) {
+	qIdx := findOutsideQuotes(segment, "?")
+	if qIdx < 0 {
+		return segment, "", "", false, nil
+	}
+
+	primary = strings.TrimSpace(segment[:qIdx])
+	if primary == "" {
+		return "", "", "", false, errors.New("expected action before ?")
+	}
+
+	rest := strings.TrimSpace(segment[qIdx+1:])
+	if rest == "" {
+		return "", "", "", false, errors.New("expected outcome after ?")
+	}
+
+	colonIdx := findOutsideQuotes(rest, ":")
+	if colonIdx < 0 {
+		return primary, rest, "", true, nil
+	}
+
+	success = strings.TrimSpace(rest[:colonIdx])
+	failure = strings.TrimSpace(rest[colonIdx+1:])
+	if success == "" {
+		return "", "", "", false, errors.New("expected success outcome after ?")
+	}
+	if failure == "" {
+		return "", "", "", false, errors.New("expected failure outcome after :")
+	}
+	return primary, success, failure, true, nil
+}
+
+func parseOutcomeBranch(text string, isFailure bool) (Step, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Step{}, errors.New("outcome branch must not be empty")
+	}
+
+	tokens, err := scanTokens(text)
+	if err != nil {
+		return Step{}, err
+	}
+	if len(tokens) == 1 && tokens[0].quoted {
+		command := []string{"notify", tokens[0].value}
+		if isFailure {
+			command = append(command, "--urgency", "critical")
+		}
+		return Step{Kind: JobKindCommand, Command: command}, nil
+	}
+
+	return parsePrimaryAction(text)
+}
+
+func findOutsideQuotes(input, marker string) int {
+	inQuote := false
+	escaped := false
+	for i := 0; i < len(input); i++ {
+		ch := input[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inQuote {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && strings.HasPrefix(input[i:], marker) {
+			return i
+		}
+	}
+	return -1
 }
 
 func splitOutsideQuotes(input, separator string) []string {
@@ -253,6 +373,27 @@ func isCommandToken(value string) bool {
 		return true
 	}
 	return !looksLikeRelativePath(value)
+}
+
+func FlattenSteps(steps []Step) []Step {
+	if len(steps) == 0 {
+		return nil
+	}
+	flat := make([]Step, 0, len(steps))
+	for _, step := range steps {
+		flat = append(flat, Step{
+			Kind:    step.Kind,
+			Prompt:  step.Prompt,
+			Command: step.Command,
+		})
+		if step.OnSuccess != nil {
+			flat = append(flat, *step.OnSuccess)
+		}
+		if step.OnFailure != nil {
+			flat = append(flat, *step.OnFailure)
+		}
+	}
+	return flat
 }
 
 func syncPrimaryFields(job *Job) {

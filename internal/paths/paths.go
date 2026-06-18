@@ -96,12 +96,12 @@ func sampleConfig() string {
 #
 # Format:
 #   timezone <IANA name>
-#   <when> [cwd] <action> [&& <action>...]
+#   <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
 #
 # Optional cwd must be absolute or start with ~. It applies to every step in
 # the line. Omit it to run from ~.
 #
-# Actions (one per step; chain with &&):
+# Actions:
 #   "<prompt>"                 Codex (default)
 #   @codex "<prompt>"          Codex explicit
 #   @grok "<prompt>"           Grok headless single-turn
@@ -110,14 +110,17 @@ func sampleConfig() string {
 # Direct commands exec without a shell: no pipes, redirects, or && inside one
 # step. Chain separate steps with && instead.
 #
-# Chains behave like shell &&: each step runs only if the previous step exits 0.
+# Outcomes — run a follow-up based on the previous step's exit code:
+#   <action> ? <on-success> [: <on-failure>]
+# Each branch is a full action or a quoted notify title shorthand.
+# Quoted shorthand on failure adds --urgency critical automatically.
+#
+# Sequences — chain with && when a later step should run only after success:
+#   hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "failed"
 #
 # notify — Quickshell bar toast (falls back to notify-send):
 #   notify "title" [body]
 #   notify --urgency critical "title" [body]
-# Example chains:
-#   daily 5am @grok "do something" && notify "done" "something was done"
-#   hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
 #
 # Schedules:
 #   now                        run once when looptab loads
@@ -133,9 +136,9 @@ func sampleConfig() string {
 #
 # Examples:
 #   now "Run once with Codex from home when looptab loads."
-#   daily 5am @grok "Check my emails and prepare me a brief." && notify "brief" "done"
+#   daily 5am @grok "Check my emails and prepare me a brief." ? notify "brief" "done" : "brief failed"
 #   daily 11am ~/Work/example @codex "Review the repo."
-#   hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
+#   hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "gdrive failed"
 #   every 30s tm snapshot sessions
 #   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
 #   weekdays 9am ~/Work/example "Plan the day and update TODOs."

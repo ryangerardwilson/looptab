@@ -147,8 +147,39 @@ func (r Runner) RunWithOutputAndPID(ctx context.Context, job parser.Job, started
 		aggregate.FinishedAt = stepResult.FinishedAt
 		aggregate.ExitCode = stepResult.ExitCode
 
+		if step.OnSuccess != nil || step.OnFailure != nil {
+			var branch *parser.Step
+			if stepResult.ExitCode == 0 && step.OnSuccess != nil {
+				branch = step.OnSuccess
+			} else if stepResult.ExitCode != 0 && step.OnFailure != nil {
+				branch = step.OnFailure
+			}
+			if branch != nil {
+				branchJob := parser.Job{
+					CWD:     job.CWD,
+					Kind:    branch.Kind,
+					Prompt:  branch.Prompt,
+					Command: branch.Command,
+				}
+				branchResult := r.runStep(ctx, branchJob, aggregate.StartedAt, output, nil)
+				if outputBuf.Len() > 0 && branchResult.Output != "" {
+					outputBuf.WriteString("\n")
+				}
+				outputBuf.WriteString(branchResult.Output)
+				aggregate.Output = outputBuf.String()
+				aggregate.FinishedAt = branchResult.FinishedAt
+				if branchResult.Err != nil {
+					aggregate.Err = fmt.Errorf("step %d outcome failed: %w", index+1, branchResult.Err)
+					return aggregate
+				}
+			}
+		}
+
 		if stepResult.Err != nil {
 			aggregate.Err = fmt.Errorf("step %d failed: %w", index+1, stepResult.Err)
+			return aggregate
+		}
+		if stepResult.ExitCode != 0 {
 			return aggregate
 		}
 	}

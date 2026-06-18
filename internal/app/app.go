@@ -871,7 +871,7 @@ func runCheck(p paths.Paths, w io.Writer) error {
 		if !info.IsDir() {
 			invalid = append(invalid, fmt.Sprintf("line %d: cwd is not a directory: %s", job.Line, job.CWD))
 		}
-		steps := job.Steps
+		steps := parser.FlattenSteps(job.Steps)
 		if len(steps) == 0 {
 			steps = []parser.Step{{Kind: job.Kind, Prompt: job.Prompt, Command: job.Command}}
 		}
@@ -1068,10 +1068,10 @@ features:
   # timezone <IANA name>
   timezone UTC
 
-  # <when> [cwd] <action> [&& <action>...]
+  # <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
   now "Run once with Codex from home when looptab loads."
-  daily 5am @grok "Check my emails and prepare me a brief." && notify "brief" "done"
-  hourly notify "gdrive" "started" && gdrive sync run && notify "gdrive" "finished"
+  daily 5am @grok "Check my emails and prepare me a brief." ? notify "brief" "done" : "brief failed"
+  hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : "gdrive failed"
   every 30s tm snapshot sessions
   hourly at 15 ~/Work/example "Review the repo at minute 15 every hour."
   weekdays 9am ~/Work/example "Plan the day and update TODOs."
