@@ -12,6 +12,8 @@ import (
 	"github.com/ryangerardwilson/looptab/internal/active"
 	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/oncejob"
+	"github.com/ryangerardwilson/looptab/internal/config"
+	"github.com/ryangerardwilson/looptab/internal/loader"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
 	"github.com/ryangerardwilson/looptab/internal/runlog"
@@ -64,15 +66,15 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			fmt.Fprintln(os.Stdout, "looptab stopped")
 			return nil
 		case <-ticker.C:
-			stat, err := os.Stat(s.paths.ConfigFile)
+			latestMtime, err := config.LatestMtime(s.paths)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "looptab reload skipped: %v\n", err)
 				continue
 			}
-			if !stat.ModTime().After(mtime) {
+			if latestMtime.IsZero() || !latestMtime.After(mtime) {
 				continue
 			}
-			if time.Since(stat.ModTime()) < reloadSettleInterval {
+			if time.Since(latestMtime) < reloadSettleInterval {
 				continue
 			}
 
@@ -103,16 +105,15 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 func (s *Scheduler) loadFile() (parser.File, time.Time, error) {
-	content, err := os.ReadFile(s.paths.ConfigFile)
+	file, err := loader.Load(s.paths)
 	if err != nil {
 		return parser.File{}, time.Time{}, err
 	}
-	stat, err := os.Stat(s.paths.ConfigFile)
+	latestMtime, err := config.LatestMtime(s.paths)
 	if err != nil {
 		return parser.File{}, time.Time{}, err
 	}
-	file, err := parser.Parse(string(content))
-	return file, stat.ModTime(), err
+	return file, latestMtime, err
 }
 
 type scheduleHandle struct {

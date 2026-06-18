@@ -20,6 +20,8 @@ import (
 	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/editor"
 	"github.com/ryangerardwilson/looptab/internal/lock"
+	"github.com/ryangerardwilson/looptab/internal/config"
+	"github.com/ryangerardwilson/looptab/internal/loader"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
 	"github.com/ryangerardwilson/looptab/internal/runlog"
@@ -34,7 +36,7 @@ func Run(args []string, version string) error {
 	}
 
 	if len(args) == 0 {
-		if err := paths.EnsureConfigFile(p); err != nil {
+		if err := ensureLayout(p); err != nil {
 			return err
 		}
 		if err := editor.Open(p.ConfigFile); err != nil {
@@ -71,7 +73,7 @@ func Run(args []string, version string) error {
 
 func runCommand(p paths.Paths, args []string) error {
 	if len(args) == 0 {
-		if err := paths.EnsureConfigFile(p); err != nil {
+		if err := ensureLayout(p); err != nil {
 			return err
 		}
 		heldLock, err := lock.Acquire(p.LockFile)
@@ -841,16 +843,15 @@ func serviceCommand(args []string) error {
 }
 
 func runCheck(p paths.Paths, w io.Writer) error {
-	content, err := os.ReadFile(p.ConfigFile)
+	if err := ensureLayout(p); err != nil {
+		return err
+	}
+
+	file, err := loader.Load(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("looptab file not found: %s\nrun `looptab` to create it", p.ConfigFile)
 		}
-		return err
-	}
-
-	file, err := parser.Parse(string(content))
-	if err != nil {
 		return err
 	}
 
@@ -911,6 +912,7 @@ func runCheck(p paths.Paths, w io.Writer) error {
 
 	fmt.Fprintf(w, "looptab check passed\n")
 	fmt.Fprintf(w, "file: %s\n", p.ConfigFile)
+	fmt.Fprintf(w, "config: %s\n", config.SettingsPath(p))
 	fmt.Fprintf(w, "timezone: %s\n", file.Timezone)
 	fmt.Fprintf(w, "jobs: %d\n", len(file.Jobs))
 	if needsCodex {
@@ -931,11 +933,14 @@ func runCheck(p paths.Paths, w io.Writer) error {
 }
 
 func loadFile(p paths.Paths) (parser.File, error) {
-	content, err := os.ReadFile(p.ConfigFile)
-	if err != nil {
-		return parser.File{}, err
+	return loader.Load(p)
+}
+
+func ensureLayout(p paths.Paths) error {
+	if err := config.EnsureSettings(p); err != nil {
+		return err
 	}
-	return parser.Parse(string(content))
+	return paths.EnsureConfigFile(p)
 }
 
 func printNowNotice(p paths.Paths, w io.Writer) error {
@@ -1065,8 +1070,7 @@ global actions:
 
 features:
   edit the source-of-truth loop file
-  # timezone <IANA name>
-  timezone UTC
+  # timezone lives in ~/.config/looptab/config.json
 
   # <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
   now "Run once with Codex from home when looptab loads."

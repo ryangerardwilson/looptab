@@ -17,6 +17,8 @@ import (
 
 const DefaultTimezone = "UTC"
 
+const timezoneMovedError = "timezone is configured in config.json, not in the looptab file"
+
 type File struct {
 	Timezone string
 	Location *time.Location
@@ -64,19 +66,24 @@ func (errs ParseErrors) Error() string {
 	return strings.Join(lines, "\n")
 }
 
-func Parse(content string) (File, error) {
-	location, err := loadTimezone(DefaultTimezone)
+func Parse(content string, timezone string) (File, error) {
+	if strings.TrimSpace(timezone) == "" {
+		timezone = DefaultTimezone
+	}
+	location, err := loadTimezone(timezone)
 	if err != nil {
 		return File{}, err
 	}
+	return ParseWithLocation(content, location.String(), location)
+}
+
+func ParseWithLocation(content string, timezone string, location *time.Location) (File, error) {
 	file := File{
-		Timezone: DefaultTimezone,
+		Timezone: timezone,
 		Location: location,
 	}
 
 	var errs ParseErrors
-	seenTimezone := false
-	seenJob := false
 
 	lines := strings.Split(content, "\n")
 	for index, raw := range lines {
@@ -87,26 +94,10 @@ func Parse(content string) (File, error) {
 		}
 
 		if isTimezoneDirective(trimmed) {
-			if seenJob {
-				errs = append(errs, lineErr(lineNumber, "timezone must appear before jobs"))
-				continue
-			}
-			if seenTimezone {
-				errs = append(errs, lineErr(lineNumber, "timezone is already set"))
-				continue
-			}
-			timezone, location, err := parseTimezoneDirective(trimmed)
-			if err != nil {
-				errs = append(errs, lineErr(lineNumber, err.Error()))
-				continue
-			}
-			file.Timezone = timezone
-			file.Location = location
-			seenTimezone = true
+			errs = append(errs, lineErr(lineNumber, timezoneMovedError))
 			continue
 		}
 
-		seenJob = true
 		job, err := parseLine(lineNumber, trimmed, file.Timezone)
 		if err != nil {
 			errs = append(errs, err)
@@ -121,8 +112,8 @@ func Parse(content string) (File, error) {
 	return file, nil
 }
 
-func ParseFile(content string) ([]Job, error) {
-	file, err := Parse(content)
+func ParseFile(content string, timezone string) ([]Job, error) {
+	file, err := Parse(content, timezone)
 	return file.Jobs, err
 }
 

@@ -95,8 +95,9 @@ func sampleConfig() string {
 # Add recurring jobs here instead of enabling per-app systemd timers.
 #
 # Format:
-#   timezone <IANA name>
 #   <when> [cwd] <action> [? on-success [: on-failure]] [&& ...]
+#
+# Timezone is configured in config.json beside this file.
 #
 # Optional cwd must be absolute or start with ~. It applies to every step in
 # the line. Omit it to run from ~.
@@ -148,6 +149,5 @@ func sampleConfig() string {
 #   looptab run | looptab run now | looptab run job <id>
 #   looptab status | looptab inspect <id> | looptab stream
 #   looptab service restart
-timezone UTC
 `)
 }

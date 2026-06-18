@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseActionChain(t *testing.T) {
-	file, err := Parse(`daily 5am @grok "do something" && notify "something was done"`)
+	file, err := Parse(`daily 5am @grok "do something" && notify "something was done"`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestParseActionChain(t *testing.T) {
 }
 
 func TestParseOutcomeSyntax(t *testing.T) {
-	file, err := Parse(`daily 5am @grok "do something" ? notify "something was done" : "something failed"`)
+	file, err := Parse(`daily 5am @grok "do something" ? notify "something was done" : "something failed"`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestParseOutcomeSyntax(t *testing.T) {
 }
 
 func TestParseOutcomeWithChain(t *testing.T) {
-	file, err := Parse(`hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : notify "gdrive" "failed" --urgency critical`)
+	file, err := Parse(`hourly notify "gdrive" "started" && gdrive sync run ? notify "gdrive" "finished" : notify "gdrive" "failed" --urgency critical`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestParseOutcomeWithChain(t *testing.T) {
 }
 
 func TestParseEveryIntervalSchedule(t *testing.T) {
-	file, err := Parse(`every 30s tm snapshot sessions`)
+	file, err := Parse(`every 30s tm snapshot sessions`, "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
