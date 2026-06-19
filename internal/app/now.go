@@ -31,7 +31,7 @@ func runNowCommand(p paths.Paths, args []string) error {
 		if err != nil {
 			return err
 		}
-		return runJobOnce(p, file, job)
+		return runManualJobOnce(p, file, job)
 	default:
 		return errors.New("expected `looptab now` or `looptab now <index-or-job-id>`")
 	}
@@ -65,7 +65,7 @@ func runInteractiveNowSelect(p paths.Paths, file parser.File) error {
 	if err != nil {
 		return err
 	}
-	return runJobOnce(p, file, job)
+	return runManualJobOnce(p, file, job)
 }
 
 func printRegisteredJobs(w io.Writer, jobs []parser.Job) {

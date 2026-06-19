@@ -17,14 +17,14 @@ import (
 	"time"
 
 	"github.com/ryangerardwilson/looptab/internal/active"
-	"github.com/ryangerardwilson/looptab/internal/runner"
-	"github.com/ryangerardwilson/looptab/internal/editor"
-	"github.com/ryangerardwilson/looptab/internal/lock"
 	"github.com/ryangerardwilson/looptab/internal/config"
+	"github.com/ryangerardwilson/looptab/internal/editor"
 	"github.com/ryangerardwilson/looptab/internal/loader"
+	"github.com/ryangerardwilson/looptab/internal/lock"
 	"github.com/ryangerardwilson/looptab/internal/parser"
 	"github.com/ryangerardwilson/looptab/internal/paths"
 	"github.com/ryangerardwilson/looptab/internal/runlog"
+	"github.com/ryangerardwilson/looptab/internal/runner"
 	"github.com/ryangerardwilson/looptab/internal/scheduler"
 	"github.com/ryangerardwilson/looptab/internal/service"
 )
@@ -1132,9 +1132,9 @@ global actions:
   looptab version
     print the installed version
   looptab now
-    list registered jobs and run one immediately
+    list registered jobs and run one immediately; AI-first jobs open the agent TUI
   looptab now <index-or-job-id>
-    run a registered job immediately without prompting
+    run a registered job immediately without prompting; AI-first jobs open the agent TUI
 
 features:
   edit the source-of-truth loop file
@@ -1156,6 +1156,7 @@ features:
   # now [index-or-job-id]
   looptab now
   looptab now 0
+  # AI-first @codex and @grok jobs open their TUI here; follow-up steps stay headless
 
   run the scheduler in the foreground or run scheduled now-jobs
   # run | run now | run job <id>
