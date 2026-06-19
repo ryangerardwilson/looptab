@@ -41,11 +41,13 @@ Action forms:
 ```text
 "<prompt>"                 # Codex (default)
 @codex "<prompt>"          # Codex
-@grok "<prompt>"           # Grok headless single-turn
+@grok "<prompt>"           # Grok
 <executable> [args...]     # direct command, no shell
 ```
 
 For AI jobs, the working directory must appear before `@grok`, `@codex`, or the quoted prompt when you set one explicitly. For command jobs, a path is only treated as `cwd` when it is followed by `@grok`, `@codex`, or a quoted prompt.
+
+Scheduled AI jobs run headlessly. Manual `looptab now` and `looptab now <index-or-job-id>` launch the Codex or Grok TUI when the first step is an AI job and stdin, stdout, and stderr are real terminals. Outcome branches and later chain steps run headlessly after the TUI exits, so exit-code follow-ups keep working.
 
 Supported schedules:
 
@@ -90,6 +92,12 @@ looptab run now
 
 looptab run job <id>
   run one parsed job immediately
+
+looptab now
+  pick a registered job and run it immediately; AI-first jobs open the agent TUI
+
+looptab now <index-or-job-id>
+  run a registered job immediately; AI-first jobs open the agent TUI
 
 looptab inspect
   follow the only active run's live output

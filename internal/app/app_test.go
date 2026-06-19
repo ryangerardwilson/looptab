@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -73,6 +74,111 @@ func TestSelectJobRejectsOutOfRangeIndex(t *testing.T) {
 	if _, err := selectJob(jobs, "3"); err == nil {
 		t.Fatal("expected out of range error")
 	}
+}
+
+func TestShouldLaunchInteractiveAgentOnlyForAIFirstJobsWithTTYs(t *testing.T) {
+	jobs, err := parser.ParseFile(`now @codex "One."`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shouldLaunchInteractiveAgent(jobs[0], true, true, true) {
+		t.Fatal("expected simple codex job with TTYs to launch interactively")
+	}
+	if shouldLaunchInteractiveAgent(jobs[0], false, true, true) {
+		t.Fatal("expected non-TTY stdin to fall back to headless execution")
+	}
+
+	outcome, err := parser.ParseFile(`now @codex "One." ? notify heading "done" : notify heading "failed"`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shouldLaunchInteractiveAgent(outcome[0], true, true, true) {
+		t.Fatal("expected AI job with outcome branches to launch interactively")
+	}
+
+	chained, err := parser.ParseFile(`now @codex "One." && notify heading "done"`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shouldLaunchInteractiveAgent(chained[0], true, true, true) {
+		t.Fatal("expected AI-first chained job to launch interactively")
+	}
+
+	command, err := parser.ParseFile(`now notify heading "done"`, "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shouldLaunchInteractiveAgent(command[0], true, true, true) {
+		t.Fatal("expected command job to stay headless")
+	}
+}
+
+func TestInteractiveAgentCommandUsesCodexTUI(t *testing.T) {
+	fake := fakeExecutable(t, "codex")
+	t.Setenv("CODEX_BIN", fake)
+
+	bin, args, label, err := interactiveAgentCommand(parser.Job{
+		Kind:   parser.JobKindCodex,
+		CWD:    "/tmp/project",
+		Prompt: "Do useful work.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bin != fake {
+		t.Fatalf("expected fake codex binary, got %s", bin)
+	}
+	if label != "codex" {
+		t.Fatalf("expected codex label, got %s", label)
+	}
+	want := []string{"--cd", "/tmp/project", "Do useful work."}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("unexpected codex args:\nwant %#v\n got %#v", want, args)
+	}
+	for _, arg := range args {
+		if arg == "exec" {
+			t.Fatalf("interactive codex command must not use exec: %#v", args)
+		}
+	}
+}
+
+func TestInteractiveAgentCommandUsesGrokTUI(t *testing.T) {
+	fake := fakeExecutable(t, "grok")
+	t.Setenv("GROK_BIN", fake)
+
+	bin, args, label, err := interactiveAgentCommand(parser.Job{
+		Kind:   parser.JobKindGrok,
+		CWD:    "/tmp/project",
+		Prompt: "Do useful work.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bin != fake {
+		t.Fatalf("expected fake grok binary, got %s", bin)
+	}
+	if label != "grok" {
+		t.Fatalf("expected grok label, got %s", label)
+	}
+	want := []string{"--always-approve", "--cwd", "/tmp/project", "Do useful work."}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("unexpected grok args:\nwant %#v\n got %#v", want, args)
+	}
+	for _, arg := range args {
+		if arg == "-p" || arg == "--single" {
+			t.Fatalf("interactive grok command must not use single-turn mode: %#v", args)
+		}
+	}
+}
+
+func fakeExecutable(t *testing.T, name string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestEditSnapshotDetectsUnchangedFile(t *testing.T) {
